@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>网络流量监控</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            background: #f4f6f8; 
+            margin: 0; 
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 { 
+            text-align: center; 
+            margin: 20px 0;
+            color: #2c3e50;
+        }
+        .stats-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .update-time {
+            color: #666;
+            font-size: 0.9em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        th {
+            background: #2c3e50;
+            color: #fff;
+            font-weight: 500;
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover {
+            background: #34495e;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .sort-icon {
+            margin-left: 5px;
+        }
+        .traffic-value {
+            font-family: monospace;
+            font-size: 0.95em;
+        }
+        .ip-address {
+            font-family: monospace;
+            color: #2980b9;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+        }
+        @media (max-width: 1200px) {
+            .container {
+                padding: 0 10px;
+            }
+            table {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>网络流量监控</h1>
+        <div class="stats-header">
+            <div class="update-time" id="updateTime"></div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th data-key="remote_ip">远程IP</th>
+                    <th data-key="local_ip">本地IP</th>
+                    <th data-key="total_bytes_in">总接收流量</th>
+                    <th data-key="total_bytes_out">总发送流量</th>
+                    <th data-key="total_packets_in">接收包数</th>
+                    <th data-key="total_packets_out">发送包数</th>
+                    <th data-key="bytes_in_per_sec">接收速率</th>
+                    <th data-key="bytes_out_per_sec">发送速率</th>
+                    <th data-key="connections">连接数</th>
+                    <th data-key="first_seen">首次发现</th>
+                    <th data-key="last_seen">最后活动</th>
+                </tr>
+            </thead>
+            <tbody id="trafficTable">
+                <tr><td colspan="11">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // 单位自适应显示
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + units[i];
+        }
+
+        function formatBytesPerSec(bytesPerSec) {
+            // 转换为 bps
+            const bps = bytesPerSec * 8;
+            
+            // 根据速率大小选择合适的单位
+            if (bps < 1000) {
+                return bps.toFixed(1) + ' bps';
+            } else if (bps < 1000000) {
+                return (bps / 1000).toFixed(2) + ' Kbps';
+            } else if (bps < 1000000000) {
+                return (bps / 1000000).toFixed(2) + ' Mbps';
+            } else {
+                return (bps / 1000000000).toFixed(2) + ' Gbps';
+            }
+        }
+
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // 排序相关
+        let trafficDataCache = [];
+        let sortKey = 'bytes_out_per_sec';
+        let sortAsc = false;
+
+        function renderTable(data) {
+            const tbody = document.getElementById('trafficTable');
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="11">暂无数据</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.map(item => `
+                <tr>
+                    <td class="ip-address">${item.remote_ip}</td>
+                    <td class="ip-address">${item.local_ip}</td>
+                    <td class="traffic-value">${formatBytes(item.total_bytes_in)}</td>
+                    <td class="traffic-value">${formatBytes(item.total_bytes_out)}</td>
+                    <td class="traffic-value">${item.total_packets_in.toLocaleString()}</td>
+                    <td class="traffic-value">${item.total_packets_out.toLocaleString()}</td>
+                    <td class="traffic-value">${formatBytesPerSec(item.bytes_in_per_sec)}</td>
+                    <td class="traffic-value">${formatBytesPerSec(item.bytes_out_per_sec)}</td>
+                    <td class="traffic-value">${item.connections}</td>
+                    <td class="timestamp">${formatTimestamp(item.first_seen)}</td>
+                    <td class="timestamp">${formatTimestamp(item.last_seen)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function sortData() {
+            let data = [...trafficDataCache];
+            data.sort((a, b) => {
+                let v1 = a[sortKey], v2 = b[sortKey];
+                if (typeof v1 === 'string') {
+                    return sortAsc ? v1.localeCompare(v2) : v2.localeCompare(v1);
+                } else {
+                    return sortAsc ? v1 - v2 : v2 - v1;
+                }
+            });
+            return data;
+        }
+
+        function updateSortIndicator() {
+            const headers = document.querySelectorAll('th');
+            headers.forEach(header => {
+                const key = header.getAttribute('data-key');
+                const originalText = header.getAttribute('data-original-text') || header.textContent.trim();
+                if (!header.hasAttribute('data-original-text')) {
+                    header.setAttribute('data-original-text', originalText);
+                }
+                if (key === sortKey) {
+                    header.innerHTML = `${originalText} ${sortAsc ? '▲' : '▼'}`;
+                } else {
+                    header.innerHTML = originalText;
+                }
+            });
+        }
+
+        function fetchTraffic() {
+            fetch('/api/traffic')
+                .then(res => res.json())
+                .then(data => {
+                    trafficDataCache = data;
+                    const updateTime = document.getElementById('updateTime');
+                    renderTable(sortData());
+                    updateTime.textContent = '最后刷新时间：' + new Date().toLocaleString('zh-CN');
+                })
+                .catch(() => {
+                    document.getElementById('trafficTable').innerHTML = 
+                        '<tr><td colspan="11">获取数据失败</td></tr>';
+                });
+        }
+
+        // 表头排序事件
+        document.addEventListener('DOMContentLoaded', function() {
+            const thead = document.querySelector('thead');
+            thead.addEventListener('click', function(e) {
+                if (e.target.tagName === 'TH') {
+                    const key = e.target.getAttribute('data-key');
+                    if (key) {
+                        if (sortKey === key) {
+                            sortAsc = !sortAsc;
+                        } else {
+                            sortKey = key;
+                            sortAsc = false;
+                        }
+                        updateSortIndicator();
+                        renderTable(sortData());
+                    }
+                }
+            });
+
+            // 初始排序指示
+            updateSortIndicator();
+        });
+
+        // 初始加载和定时刷新
+        fetchTraffic();
+        setInterval(fetchTraffic, 3000);
+    </script>
+</body>
+</html>
