@@ -1,5 +1,5 @@
 # 构建阶段
-FROM golang:1.21-bullseye AS builder
+FROM golang:1.24.3-bullseye AS builder
 
 # 安装依赖
 RUN apt-get update && apt-get install -y \
@@ -16,13 +16,15 @@ RUN go mod download
 COPY . .
 
 # 构建应用
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 RUN CGO_ENABLED=1 GOOS=linux go build -o netbouncer main.go
 
 # 运行阶段
-FROM debian:bullseye-slim
+FROM ubuntu:22.04
 
 # 安装运行时依赖
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libpcap0.8 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -2,16 +2,16 @@ package web
 
 import (
 	"net/http"
-	"time"
 
-	"github.com/graydovee/netbouncer/pkg/monitor"
+	"github.com/graydovee/netbouncer/pkg/service"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 type Server struct {
-	monitor *monitor.Monitor
-	echo    *echo.Echo
+	netService *service.NetService
+
+	echo *echo.Echo
 }
 
 // TrafficData 用于API响应的数据结构
@@ -29,8 +29,12 @@ type TrafficData struct {
 	LastSeen        string  `json:"last_seen"`         // 最后活动时间
 }
 
-func NewServer(mon *monitor.Monitor) *Server {
+func NewServer(netService *service.NetService) *Server {
 	e := echo.New()
+	svr := &Server{
+		netService: netService,
+		echo:       e,
+	}
 
 	// 中间件
 	e.Use(middleware.Logger())
@@ -41,44 +45,61 @@ func NewServer(mon *monitor.Monitor) *Server {
 	e.Static("/static", "static")
 
 	// 路由
-	e.GET("/", handleIndex)
-	e.GET("/api/traffic", handleGetTraffic(mon))
+	e.GET("/", svr.handleIndex)
+	e.GET("/api/traffic", svr.handleGetTraffic)
+	e.POST("/api/ban", svr.handleBanIP)
+	e.POST("/api/unban", svr.handleUnbanIP)
+	e.GET("/api/banned", svr.handleGetBannedIPs)
+	e.GET("/banned", svr.handleBannedPage)
 
-	return &Server{
-		monitor: mon,
-		echo:    e,
-	}
+	return svr
 }
 
 func (s *Server) Start(addr string) error {
 	return s.echo.Start(addr)
 }
 
-func handleIndex(c echo.Context) error {
+func (s *Server) handleIndex(c echo.Context) error {
 	return c.File("view/monitor.html")
 }
 
-func handleGetTraffic(mon *monitor.Monitor) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		stats := mon.GetAllRemoteIPStats()
-		trafficData := make([]TrafficData, 0, len(stats))
+func (s *Server) handleGetTraffic(c echo.Context) error {
+	trafficData := s.netService.GetAllRemoteIPStats()
+	return c.JSON(http.StatusOK, Success(trafficData))
+}
 
-		for _, stat := range stats {
-			trafficData = append(trafficData, TrafficData{
-				RemoteIP:        stat.RemoteIP,
-				LocalIP:         stat.LocalIP,
-				TotalBytesIn:    stat.BytesRecv,
-				TotalBytesOut:   stat.BytesSent,
-				TotalPacketsIn:  stat.PacketsRecv,
-				TotalPacketsOut: stat.PacketsSent,
-				BytesInPerSec:   stat.BytesRecvPerSec,
-				BytesOutPerSec:  stat.BytesSentPerSec,
-				Connections:     stat.Connections,
-				FirstSeen:       stat.FirstSeen.Format(time.RFC3339),
-				LastSeen:        stat.LastSeen.Format(time.RFC3339),
-			})
-		}
-
-		return c.JSON(http.StatusOK, trafficData)
+func (s *Server) handleBanIP(c echo.Context) error {
+	var r IPRequest
+	if err := c.Bind(&r); err != nil || r.IP == "" {
+		return c.JSON(http.StatusOK, Error(400, "参数错误"))
 	}
+	err := s.netService.BanIP(r.IP)
+	if err != nil {
+		return c.JSON(http.StatusOK, Error(500, err.Error()))
+	}
+	return c.JSON(http.StatusOK, Success("已禁用"))
+}
+
+func (s *Server) handleUnbanIP(c echo.Context) error {
+	var r IPRequest
+	if err := c.Bind(&r); err != nil || r.IP == "" {
+		return c.JSON(http.StatusOK, Error(400, "参数错误"))
+	}
+	err := s.netService.UnbanIP(r.IP)
+	if err != nil {
+		return c.JSON(http.StatusOK, Error(500, err.Error()))
+	}
+	return c.JSON(http.StatusOK, Success("已解禁"))
+}
+
+func (s *Server) handleGetBannedIPs(c echo.Context) error {
+	ips, err := s.netService.GetBannedIPs()
+	if err != nil {
+		return c.JSON(http.StatusOK, Error(500, err.Error()))
+	}
+	return c.JSON(http.StatusOK, Success(ips))
+}
+
+func (s *Server) handleBannedPage(c echo.Context) error {
+	return c.File("view/banned.html")
 }

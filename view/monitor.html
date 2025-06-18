@@ -81,6 +81,7 @@
                 overflow-x: auto;
             }
         }
+        .banned-link:hover { background: #c0392b; }
     </style>
 </head>
 <body>
@@ -88,6 +89,7 @@
         <h1>网络流量监控</h1>
         <div class="stats-header">
             <div class="update-time" id="updateTime"></div>
+            <a href="/banned" class="banned-link" style="padding: 8px 18px; background: #2980b9; color: #fff; border-radius: 5px; text-decoration: none; font-weight: 500;">禁用IP列表管理</a>
         </div>
         <table>
             <thead>
@@ -103,10 +105,11 @@
                     <th data-key="connections">连接数</th>
                     <th data-key="first_seen">首次发现</th>
                     <th data-key="last_seen">最后活动</th>
+                    <th>操作</th>
                 </tr>
             </thead>
             <tbody id="trafficTable">
-                <tr><td colspan="11">加载中...</td></tr>
+                <tr><td colspan="12">加载中...</td></tr>
             </tbody>
         </table>
     </div>
@@ -153,14 +156,38 @@
         let sortKey = 'bytes_out_per_sec';
         let sortAsc = false;
 
+        let bannedIPsSet = new Set();
+
+        function fetchBannedIPs() {
+            return fetch('/api/banned')
+                .then(res => res.json())
+                .then(res => {
+                    if (res.code === 200) {
+                        bannedIPsSet = new Set(res.data);
+                    } else {
+                        bannedIPsSet = new Set();
+                    }
+                });
+        }
+
+        function banIP(ip) {
+            return fetch('/api/ban', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip })
+            }).then(res => res.json());
+        }
+
         function renderTable(data) {
             const tbody = document.getElementById('trafficTable');
             if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="11">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="12">暂无数据</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = data.map(item => `
+            tbody.innerHTML = data.map(item => {
+                const banned = bannedIPsSet.has(item.remote_ip);
+                return `
                 <tr>
                     <td class="ip-address">${item.remote_ip}</td>
                     <td class="ip-address">${item.local_ip}</td>
@@ -173,8 +200,10 @@
                     <td class="traffic-value">${item.connections}</td>
                     <td class="timestamp">${formatTimestamp(item.first_seen)}</td>
                     <td class="timestamp">${formatTimestamp(item.last_seen)}</td>
+                    <td><button class="ban-btn" data-ip="${item.remote_ip}" ${banned ? 'disabled' : ''}>${banned ? '已禁用' : '禁用'}</button></td>
                 </tr>
-            `).join('');
+                `;
+            }).join('');
         }
 
         function sortData() {
@@ -207,18 +236,22 @@
         }
 
         function fetchTraffic() {
-            fetch('/api/traffic')
-                .then(res => res.json())
-                .then(data => {
-                    trafficDataCache = data;
-                    const updateTime = document.getElementById('updateTime');
-                    renderTable(sortData());
-                    updateTime.textContent = '最后刷新时间：' + new Date().toLocaleString('zh-CN');
-                })
-                .catch(() => {
-                    document.getElementById('trafficTable').innerHTML = 
-                        '<tr><td colspan="11">获取数据失败</td></tr>';
-                });
+            Promise.all([
+                fetch('/api/traffic').then(res => res.json()),
+                fetchBannedIPs()
+            ]).then(([res]) => {
+                if (res.code === 200) {
+                    trafficDataCache = res.data;
+                } else {
+                    trafficDataCache = [];
+                }
+                const updateTime = document.getElementById('updateTime');
+                renderTable(sortData());
+                updateTime.textContent = '最后刷新时间：' + new Date().toLocaleString('zh-CN');
+            }).catch(() => {
+                document.getElementById('trafficTable').innerHTML = 
+                    '<tr><td colspan="12">获取数据失败</td></tr>';
+            });
         }
 
         // 表头排序事件
@@ -242,6 +275,22 @@
 
             // 初始排序指示
             updateSortIndicator();
+
+            document.getElementById('trafficTable').addEventListener('click', function(e) {
+                if (e.target.classList.contains('ban-btn')) {
+                    const ip = e.target.getAttribute('data-ip');
+                    if (ip && !e.target.disabled) {
+                        banIP(ip).then(res => {
+                            if (res && res.code === 200) {
+                                bannedIPsSet.add(ip);
+                                fetchTraffic();
+                            } else if (res && res.message) {
+                                alert('禁用失败: ' + res.message);
+                            }
+                        });
+                    }
+                }
+            });
         });
 
         // 初始加载和定时刷新

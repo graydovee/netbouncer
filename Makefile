@@ -9,6 +9,9 @@ tidy:
 build: tidy
 	go build -o bin/netbouncer main.go
 
+debug:
+	./bin/netbouncer --debug
+
 run:
 	./bin/netbouncer
 
@@ -16,11 +19,12 @@ clean:
 	rm -f bin/netbouncer
 
 # Docker相关变量
-DOCKER_IMAGE ?= netbouncer
+DOCKER_IMAGE ?= graydovee/netbouncer
 PLATFORMS ?= linux/amd64,linux/arm64
 
 docker-release:
 	@echo "Building docker image $(DOCKER_IMAGE):$(DOCKER_TAG)"
 	docker buildx build --platform $(PLATFORMS) \
 		-t $(DOCKER_IMAGE):$(DOCKER_TAG) \
+		-t $(DOCKER_IMAGE):latest \
 		--push .

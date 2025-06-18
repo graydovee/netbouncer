@@ -3,6 +3,7 @@ module github.com/graydovee/netbouncer
 go 1.24.3
 
 require (
+	github.com/coreos/go-iptables v0.8.0
 	github.com/google/gopacket v1.1.19
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/spf13/cobra v1.9.1
