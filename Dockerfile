@@ -26,6 +26,7 @@ FROM ubuntu:22.04
 # 安装运行时依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpcap0.8 \
+    iptables \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

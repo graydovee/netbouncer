@@ -1,0 +1,65 @@
+# NetBouncer 配置文件示例
+
+# 监控配置
+monitor:
+  interface: "eth0"  # 网络接口名称（留空自动选择）
+  exclude_subnets: "127.0.0.1/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"  # 排除的子网（逗号分隔）
+  window: 60  # 监控时间窗口（秒）
+  timeout: 86400  # 连接超时时间（秒，24小时）
+
+# 防火墙配置
+firewall:
+  chain: "NETBOUNCER"  # iptables链名称
+
+# Web服务配置
+web:
+  listen: "0.0.0.0:8080"  # Web服务监听地址
+
+# 存储配置
+storage:
+  type: "database"  # "memory" 或 "database"
+  database:
+    driver: "sqlite"        # "sqlite", "mysql", "postgres"
+    host: ""                # 数据库主机地址（sqlite不需要）
+    port: 0                 # 数据库端口号（sqlite不需要）
+    username: ""            # 数据库用户名（sqlite不需要）
+    password: ""            # 数据库密码（sqlite不需要）
+    database: "netbouncer.db"  # 数据库名称或文件路径
+    dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
+
+# 调试模式
+debug: false
+
+# 使用内存存储的配置示例：
+# storage:
+#   type: "memory"
+
+# 使用SQLite的配置示例：
+# storage:
+#   type: "database"
+#   database:
+#     driver: "sqlite"
+#     database: "netbouncer.db"  # SQLite数据库文件路径
+#     # 其他字段对于SQLite可以留空
+
+# 使用MySQL的配置示例：
+# storage:
+#   type: "database"
+#   database:
+#     driver: "mysql"
+#     host: "localhost"
+#     port: 3306
+#     username: "netbouncer"
+#     password: "password"
+#     database: "netbouncer"
+
+# 使用PostgreSQL的配置示例：
+# storage:
+#   type: "database"
+#   database:
+#     driver: "postgres"
+#     host: "localhost"
+#     port: 5432
+#     username: "netbouncer"
+#     password: "password"
+#     database: "netbouncer" 

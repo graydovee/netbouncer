@@ -1,7 +1,9 @@
 package web
 
 import (
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/graydovee/netbouncer/pkg/service"
 	"github.com/labstack/echo/v4"
@@ -29,15 +31,64 @@ type TrafficData struct {
 	LastSeen        string  `json:"last_seen"`         // 最后活动时间
 }
 
+// slogLogger 自定义日志中间件，使用Go的slog
+func slogLogger() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			start := time.Now()
+
+			err := next(c)
+
+			duration := time.Since(start)
+
+			req := c.Request()
+			res := c.Response()
+
+			status := res.Status
+			var logFunc func(msg string, args ...any)
+
+			switch {
+			case status >= 500:
+				logFunc = slog.Error
+			case status >= 400:
+				logFunc = slog.Warn
+			default:
+				logFunc = slog.Info
+			}
+
+			args := []any{
+				"method", req.Method,
+				"uri", req.RequestURI,
+				"status", status,
+				"duration", duration.String(),
+				"remote_ip", c.RealIP(),
+				"user_agent", req.UserAgent(),
+			}
+
+			if err != nil {
+				args = append(args, "error", err.Error())
+			}
+
+			logFunc("HTTP Request", args...)
+
+			return err
+		}
+	}
+}
+
 func NewServer(netService *service.NetService) *Server {
 	e := echo.New()
+
+	// 隐藏Echo框架的banner
+	e.HideBanner = true
+
 	svr := &Server{
 		netService: netService,
 		echo:       e,
 	}
 
 	// 中间件
-	e.Use(middleware.Logger())
+	e.Use(slogLogger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 
@@ -64,7 +115,7 @@ func (s *Server) handleIndex(c echo.Context) error {
 }
 
 func (s *Server) handleGetTraffic(c echo.Context) error {
-	trafficData := s.netService.GetAllRemoteIPStats()
+	trafficData := s.netService.GetStats()
 	return c.JSON(http.StatusOK, Success(trafficData))
 }
 

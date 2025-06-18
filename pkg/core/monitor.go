@@ -3,14 +3,16 @@ package core
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
-	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"github.com/graydovee/netbouncer/pkg/config"
 )
 
 // TrafficStats 流量统计信息（对外暴露）
@@ -48,7 +50,7 @@ type trafficWindow struct {
 // windowPoint 窗口数据点
 type windowPoint struct {
 	timestamp time.Time
-	bytes     uint64
+	increment uint64 // 这次增加的字节数
 }
 
 // newTrafficWindow 创建新的流量滑动窗口
@@ -63,16 +65,17 @@ func newTrafficWindow(windowSize time.Duration) *trafficWindow {
 }
 
 // addPoint 添加数据点
-func (tw *trafficWindow) addPoint(bytes uint64) {
+func (tw *trafficWindow) addPoint(increment uint64) {
 	tw.mutex.Lock()
 	defer tw.mutex.Unlock()
 	now := time.Now()
+
 	// 移除过期的数据点
 	tw.cleanup(now)
 	// 添加新数据点
 	tw.points = append(tw.points, windowPoint{
 		timestamp: now,
-		bytes:     bytes,
+		increment: increment,
 	})
 }
 
@@ -93,21 +96,27 @@ func (tw *trafficWindow) cleanup(now time.Time) {
 func (tw *trafficWindow) getRate() float64 {
 	tw.mutex.Lock()
 	defer tw.mutex.Unlock()
-	if len(tw.points) < 2 {
-		return 0
-	}
+
 	now := time.Now()
 	tw.cleanup(now)
-	if len(tw.points) < 2 {
+
+	if len(tw.points) == 0 {
 		return 0
 	}
-	// 计算时间窗口内的总字节数
-	totalBytes := tw.points[len(tw.points)-1].bytes - tw.points[0].bytes
-	timeDiff := tw.points[len(tw.points)-1].timestamp.Sub(tw.points[0].timestamp).Seconds()
-	if timeDiff <= 0 {
+
+	// 计算窗口内的总增量字节数
+	var totalIncrement uint64
+	for _, point := range tw.points {
+		totalIncrement += point.increment
+	}
+
+	// 计算时间窗口大小
+	windowDuration := now.Sub(tw.points[0].timestamp).Seconds()
+	if windowDuration <= 0 {
 		return 0
 	}
-	return float64(totalBytes) / timeDiff
+
+	return float64(totalIncrement) / windowDuration
 }
 
 // internalTrafficStats 内部使用的流量统计信息
@@ -154,10 +163,32 @@ type Monitor struct {
 
 	windowSize        time.Duration // 滑动窗口大小（如30秒）
 	connectionTimeout time.Duration // 连接超时时间
+	excludeSubnets    []*net.IPNet
 }
 
 // NewMonitor 创建新的监控器
-func NewMonitor(device string, windowSize, connectionTimeout time.Duration) (*Monitor, error) {
+func NewMonitor(cfg *config.MonitorConfig) (*Monitor, error) {
+	device := cfg.Interface
+	windowSize := time.Duration(cfg.Window) * time.Second
+	connectionTimeout := time.Duration(cfg.Timeout) * time.Second
+
+	var excludedSubnets []*net.IPNet
+	if cfg.ExcludeSubnets != "" {
+		excludedSubnetStrs := strings.Split(cfg.ExcludeSubnets, ",")
+		for _, subnetStr := range excludedSubnetStrs {
+			subnetStr = strings.TrimSpace(subnetStr)
+			if subnetStr == "" {
+				continue
+			}
+			_, ipNet, err := net.ParseCIDR(subnetStr)
+			if err != nil {
+				return nil, fmt.Errorf("解析排除的子网失败 %s: %w", subnetStr, err)
+			}
+			excludedSubnets = append(excludedSubnets, ipNet)
+			slog.Info("排除子网", "subnet", ipNet)
+		}
+	}
+
 	if device == "" {
 		// 自动选择默认网络接口
 		devices, err := pcap.FindAllDevs()
@@ -191,6 +222,7 @@ func NewMonitor(device string, windowSize, connectionTimeout time.Duration) (*Mo
 		device:            device,
 		windowSize:        windowSize,
 		connectionTimeout: connectionTimeout,
+		excludeSubnets:    excludedSubnets,
 	}
 
 	// 获取本地IP地址
@@ -337,13 +369,21 @@ func (m *Monitor) processPacket(packet gopacket.Packet) {
 	if ipv4, ok := ipLayer.(*layers.IPv4); ok {
 		srcIP = ipv4.SrcIP.String()
 		dstIP = ipv4.DstIP.String()
-		length = uint64(ipv4.Length)
+		// 使用整个数据包的长度，而不是IP层的长度
+		length = uint64(len(packet.Data()))
 	} else if ipv6, ok := ipLayer.(*layers.IPv6); ok {
 		// 处理IPv6
 		srcIP = ipv6.SrcIP.String()
 		dstIP = ipv6.DstIP.String()
-		length = uint64(ipv6.Length)
+		// 使用整个数据包的长度
+		length = uint64(len(packet.Data()))
 	} else {
+		return
+	}
+
+	// 验证包长度合理性
+	if length == 0 || length > 65535 {
+		// 跳过无效长度的包
 		return
 	}
 
@@ -388,15 +428,15 @@ func (m *Monitor) processPacket(packet gopacket.Packet) {
 			}
 			m.stats[remoteIP] = stats
 		}
-		// TCP三次握手SYN且非ACK，认为新连接
+
+		// 改进的TCP连接数统计逻辑
+		// 只统计SYN包（新连接开始）
 		if tcpLayer.SYN && !tcpLayer.ACK {
 			stats.connections++
 		}
-		// TCP连接断开（FIN或RST），认为连接关闭
-		if tcpLayer.FIN || tcpLayer.RST {
-			if stats.connections > 0 {
-				stats.connections--
-			}
+		// 统计FIN或RST包（连接结束）
+		if (tcpLayer.FIN || tcpLayer.RST) && stats.connections > 0 {
+			stats.connections--
 		}
 		m.mutex.Unlock()
 	}
@@ -428,11 +468,11 @@ func (m *Monitor) updateStats(remoteIP string, localIP string, bytes uint64, isS
 	if isSent {
 		stats.bytesSent += bytes
 		stats.packetsSent++
-		stats.sentWindow.addPoint(stats.bytesSent)
+		stats.sentWindow.addPoint(bytes)
 	} else {
 		stats.bytesRecv += bytes
 		stats.packetsRecv++
-		stats.recvWindow.addPoint(stats.bytesRecv)
+		stats.recvWindow.addPoint(bytes)
 	}
 
 	stats.lastSeen = now
@@ -451,8 +491,8 @@ func (m *Monitor) cleanupInactiveConnections() {
 	}
 }
 
-// GetAllRemoteIPStats 获取所有远程IP的流量统计
-func (m *Monitor) GetAllRemoteIPStats() map[string]*TrafficStats {
+// GetAllStats 获取所有IP的流量统计
+func (m *Monitor) GetAllStats() map[string]*TrafficStats {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -465,23 +505,41 @@ func (m *Monitor) GetAllRemoteIPStats() map[string]*TrafficStats {
 	return result
 }
 
-// GetTopRemoteIPs 获取流量最大的前N个远程IP
-func (m *Monitor) GetTopRemoteIPs(n int) []*TrafficStats {
-	allStats := m.GetAllRemoteIPStats()
-	// 转换为切片并排序
-	var statsList []*TrafficStats
-	for _, stats := range allStats {
-		statsList = append(statsList, stats)
+// GetStats 获取过滤后的IP流量统计
+func (m *Monitor) GetStats(excludedSubnets []*net.IPNet) map[string]*TrafficStats {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	result := make(map[string]*TrafficStats)
+
+	for ip, stats := range m.stats {
+		// 检查IP是否在排除的子网中
+		if isIPExcluded(ip, excludedSubnets) {
+			continue
+		}
+		result[ip] = stats.toTrafficStats()
 	}
-	// 按总流量排序，使用sort.Slice优化
-	sort.Slice(statsList, func(i, j int) bool {
-		return statsList[i].GetTotalBytes() > statsList[j].GetTotalBytes()
-	})
-	// 返回前N个
-	if n > len(statsList) {
-		n = len(statsList)
+
+	return result
+}
+
+// isIPExcluded 检查IP是否在排除的子网中
+func isIPExcluded(ipStr string, excludedSubnets []*net.IPNet) bool {
+	if len(excludedSubnets) == 0 {
+		return false
 	}
-	return statsList[:n]
+
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	for _, subnet := range excludedSubnets {
+		if subnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // ClearStats 清空统计信息
@@ -492,16 +550,34 @@ func (m *Monitor) ClearStats() {
 	m.stats = make(map[string]*internalTrafficStats)
 }
 
-// FormatBytes 格式化字节数显示
-func FormatBytes(bytes uint64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
+// GetDebugInfo 获取调试信息
+func (m *Monitor) GetDebugInfo() map[string]interface{} {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	debugInfo := make(map[string]interface{})
+	debugInfo["total_connections"] = len(m.stats)
+	debugInfo["local_ips"] = m.localIPs
+	debugInfo["device"] = m.device
+	debugInfo["is_running"] = m.isRunning
+	debugInfo["window_size"] = m.windowSize.String()
+	debugInfo["connection_timeout"] = m.connectionTimeout.String()
+
+	// 统计总流量
+	var totalBytesSent, totalBytesRecv uint64
+	var totalPacketsSent, totalPacketsRecv uint64
+	for _, stats := range m.stats {
+		totalBytesSent += stats.bytesSent
+		totalBytesRecv += stats.bytesRecv
+		totalPacketsSent += stats.packetsSent
+		totalPacketsRecv += stats.packetsRecv
 	}
-	div, exp := uint64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+
+	debugInfo["total_bytes_sent"] = totalBytesSent
+	debugInfo["total_bytes_recv"] = totalBytesRecv
+	debugInfo["total_packets_sent"] = totalPacketsSent
+	debugInfo["total_packets_recv"] = totalPacketsRecv
+	debugInfo["total_bytes"] = totalBytesSent + totalBytesRecv
+
+	return debugInfo
 }
