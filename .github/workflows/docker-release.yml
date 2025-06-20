@@ -12,8 +12,9 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    environment: release
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -36,9 +37,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{version}}
             type=raw,value=latest
 
       - name: Build and push Docker image
@@ -57,4 +56,4 @@ jobs:
         with:
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
