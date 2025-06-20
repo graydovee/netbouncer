@@ -107,13 +107,14 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("加载配置文件失败: %w", err)
 		}
-		slog.Info("已加载配置文件", "file", configFile, "data", fileConfig)
-	}
+		fileConfigJson, _ := json.Marshal(fileConfig)
+		slog.Info("已加载配置文件", "file", configFile, "data", string(fileConfigJson))
 
-	// 合并配置，文件配置优先级高于命令行参数
-	mergo.Merge(cfg, fileConfig, mergo.WithOverride)
-	configJson, _ := json.Marshal(cfg)
-	slog.Info("合并配置完成", "config", string(configJson))
+		// 合并配置，文件配置优先级高于命令行参数
+		mergo.Merge(cfg, fileConfig, mergo.WithOverride)
+		configJson, _ := json.Marshal(cfg)
+		slog.Info("合并配置完成", "config", string(configJson))
+	}
 
 	// 创建监控器
 	mon, err := core.NewMonitor(&cfg.Monitor)

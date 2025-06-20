@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"strings"
@@ -40,117 +39,6 @@ func (ts *TrafficStats) GetTotalPackets() uint64 {
 	return ts.PacketsSent + ts.PacketsRecv
 }
 
-// trafficWindow 流量滑动窗口
-type trafficWindow struct {
-	windowSize time.Duration // 窗口大小（如30秒）
-	points     []windowPoint // 窗口数据点
-	mutex      sync.Mutex    // 新增互斥锁，保证线程安全
-}
-
-// windowPoint 窗口数据点
-type windowPoint struct {
-	timestamp time.Time
-	increment uint64 // 这次增加的字节数
-}
-
-// newTrafficWindow 创建新的流量滑动窗口
-func newTrafficWindow(windowSize time.Duration) *trafficWindow {
-	if windowSize <= 0 {
-		windowSize = 30 * time.Second
-	}
-	return &trafficWindow{
-		windowSize: windowSize,
-		points:     make([]windowPoint, 0, 30),
-	}
-}
-
-// addPoint 添加数据点
-func (tw *trafficWindow) addPoint(increment uint64) {
-	tw.mutex.Lock()
-	defer tw.mutex.Unlock()
-	now := time.Now()
-
-	// 移除过期的数据点
-	tw.cleanup(now)
-	// 添加新数据点
-	tw.points = append(tw.points, windowPoint{
-		timestamp: now,
-		increment: increment,
-	})
-}
-
-// cleanup 清理过期的数据点
-func (tw *trafficWindow) cleanup(now time.Time) {
-	cutoff := now.Add(-tw.windowSize)
-	validStart := len(tw.points)
-	for i, point := range tw.points {
-		if point.timestamp.After(cutoff) {
-			validStart = i
-			break
-		}
-	}
-	tw.points = tw.points[validStart:]
-}
-
-// getRate 计算当前速率（字节/秒）
-func (tw *trafficWindow) getRate() float64 {
-	tw.mutex.Lock()
-	defer tw.mutex.Unlock()
-
-	now := time.Now()
-	tw.cleanup(now)
-
-	if len(tw.points) == 0 {
-		return 0
-	}
-
-	// 计算窗口内的总增量字节数
-	var totalIncrement uint64
-	for _, point := range tw.points {
-		totalIncrement += point.increment
-	}
-
-	// 计算时间窗口大小
-	windowDuration := now.Sub(tw.points[0].timestamp).Seconds()
-	if windowDuration <= 0 {
-		return 0
-	}
-
-	return float64(totalIncrement) / windowDuration
-}
-
-// internalTrafficStats 内部使用的流量统计信息
-type internalTrafficStats struct {
-	remoteIP    string
-	localIP     string
-	bytesSent   uint64
-	bytesRecv   uint64
-	packetsSent uint64
-	packetsRecv uint64
-	lastSeen    time.Time
-	firstSeen   time.Time
-	connections int
-	sentWindow  *trafficWindow // 发送流量滑动窗口
-	recvWindow  *trafficWindow // 接收流量滑动窗口
-}
-
-// toTrafficStats 将内部统计转换为对外暴露的统计
-func (its *internalTrafficStats) toTrafficStats() *TrafficStats {
-	return &TrafficStats{
-		RemoteIP:        its.remoteIP,
-		LocalIP:         its.localIP,
-		BytesSent:       its.bytesSent,
-		BytesRecv:       its.bytesRecv,
-		PacketsSent:     its.packetsSent,
-		PacketsRecv:     its.packetsRecv,
-		BytesSentPerSec: its.sentWindow.getRate(),
-		BytesRecvPerSec: its.recvWindow.getRate(),
-		LastSeen:        its.lastSeen,
-		FirstSeen:       its.firstSeen,
-		Connections:     its.connections,
-	}
-}
-
 // Monitor 网络流量监控器
 type Monitor struct {
 	stats     map[string]*internalTrafficStats
@@ -174,8 +62,8 @@ func NewMonitor(cfg *config.MonitorConfig) (*Monitor, error) {
 
 	var excludedSubnets []*net.IPNet
 	if cfg.ExcludeSubnets != "" {
-		excludedSubnetStrs := strings.Split(cfg.ExcludeSubnets, ",")
-		for _, subnetStr := range excludedSubnetStrs {
+		excludedSubnetStrs := strings.SplitSeq(cfg.ExcludeSubnets, ",")
+		for subnetStr := range excludedSubnetStrs {
 			subnetStr = strings.TrimSpace(subnetStr)
 			if subnetStr == "" {
 				continue
@@ -185,7 +73,7 @@ func NewMonitor(cfg *config.MonitorConfig) (*Monitor, error) {
 				return nil, fmt.Errorf("解析排除的子网失败 %s: %w", subnetStr, err)
 			}
 			excludedSubnets = append(excludedSubnets, ipNet)
-			slog.Info("排除子网", "subnet", ipNet)
+			slog.Info("排除网段", "subnet", ipNet)
 		}
 	}
 
@@ -311,7 +199,7 @@ func (m *Monitor) Start() error {
 	// 启动清理协程
 	m.StartCleanupRoutine()
 
-	log.Printf("Network monitor started on device: %s", m.device)
+	slog.Info("Network monitor started on device", "device", m.device)
 	return nil
 }
 
@@ -328,7 +216,7 @@ func (m *Monitor) Stop() {
 		m.handle.Close()
 	}
 
-	log.Println("Network monitor stopped")
+	slog.Info("Network monitor stopped")
 }
 
 // capturePackets 捕获网络包
@@ -506,7 +394,7 @@ func (m *Monitor) GetAllStats() map[string]*TrafficStats {
 }
 
 // GetStats 获取过滤后的IP流量统计
-func (m *Monitor) GetStats(excludedSubnets []*net.IPNet) map[string]*TrafficStats {
+func (m *Monitor) GetStats() map[string]*TrafficStats {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -514,7 +402,7 @@ func (m *Monitor) GetStats(excludedSubnets []*net.IPNet) map[string]*TrafficStat
 
 	for ip, stats := range m.stats {
 		// 检查IP是否在排除的子网中
-		if isIPExcluded(ip, excludedSubnets) {
+		if isIPExcluded(ip, m.excludeSubnets) {
 			continue
 		}
 		result[ip] = stats.toTrafficStats()
@@ -580,4 +468,115 @@ func (m *Monitor) GetDebugInfo() map[string]interface{} {
 	debugInfo["total_bytes"] = totalBytesSent + totalBytesRecv
 
 	return debugInfo
+}
+
+// trafficWindow 流量滑动窗口
+type trafficWindow struct {
+	windowSize time.Duration // 窗口大小（如30秒）
+	points     []windowPoint // 窗口数据点
+	mutex      sync.Mutex    // 新增互斥锁，保证线程安全
+}
+
+// windowPoint 窗口数据点
+type windowPoint struct {
+	timestamp time.Time
+	increment uint64 // 这次增加的字节数
+}
+
+// newTrafficWindow 创建新的流量滑动窗口
+func newTrafficWindow(windowSize time.Duration) *trafficWindow {
+	if windowSize <= 0 {
+		windowSize = 30 * time.Second
+	}
+	return &trafficWindow{
+		windowSize: windowSize,
+		points:     make([]windowPoint, 0, 30),
+	}
+}
+
+// addPoint 添加数据点
+func (tw *trafficWindow) addPoint(increment uint64) {
+	tw.mutex.Lock()
+	defer tw.mutex.Unlock()
+	now := time.Now()
+
+	// 移除过期的数据点
+	tw.cleanup(now)
+	// 添加新数据点
+	tw.points = append(tw.points, windowPoint{
+		timestamp: now,
+		increment: increment,
+	})
+}
+
+// cleanup 清理过期的数据点
+func (tw *trafficWindow) cleanup(now time.Time) {
+	cutoff := now.Add(-tw.windowSize)
+	validStart := len(tw.points)
+	for i, point := range tw.points {
+		if point.timestamp.After(cutoff) {
+			validStart = i
+			break
+		}
+	}
+	tw.points = tw.points[validStart:]
+}
+
+// getRate 计算当前速率（字节/秒）
+func (tw *trafficWindow) getRate() float64 {
+	tw.mutex.Lock()
+	defer tw.mutex.Unlock()
+
+	now := time.Now()
+	tw.cleanup(now)
+
+	if len(tw.points) == 0 {
+		return 0
+	}
+
+	// 计算窗口内的总增量字节数
+	var totalIncrement uint64
+	for _, point := range tw.points {
+		totalIncrement += point.increment
+	}
+
+	// 计算时间窗口大小
+	windowDuration := now.Sub(tw.points[0].timestamp).Seconds()
+	if windowDuration <= 0 {
+		return 0
+	}
+
+	return float64(totalIncrement) / windowDuration
+}
+
+// internalTrafficStats 内部使用的流量统计信息
+type internalTrafficStats struct {
+	remoteIP    string
+	localIP     string
+	bytesSent   uint64
+	bytesRecv   uint64
+	packetsSent uint64
+	packetsRecv uint64
+	lastSeen    time.Time
+	firstSeen   time.Time
+	connections int
+	sentWindow  *trafficWindow // 发送流量滑动窗口
+	recvWindow  *trafficWindow // 接收流量滑动窗口
+}
+
+// toTrafficStats 将内部统计转换为对外暴露的统计
+func (its *internalTrafficStats) toTrafficStats() *TrafficStats {
+	return &TrafficStats{
+		RemoteIP:        its.remoteIP,
+		LocalIP:         its.localIP,
+		BytesSent:       its.bytesSent,
+		BytesRecv:       its.bytesRecv,
+		PacketsSent:     its.packetsSent,
+		PacketsRecv:     its.packetsRecv,
+		BytesSentPerSec: its.sentWindow.getRate(),
+		BytesRecvPerSec: its.recvWindow.getRate(),
+		LastSeen:        its.lastSeen,
+		FirstSeen:       its.firstSeen,
+		Connections:     its.connections,
+	}
 }

@@ -1,16 +1,83 @@
 package store
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"log/slog"
+	"time"
 
+	"github.com/graydovee/netbouncer/pkg/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-
-	"github.com/graydovee/netbouncer/pkg/config"
 )
+
+// SlogLogger 实现GORM的logger接口，使用Go的slog
+type SlogLogger struct {
+	level slog.Level
+}
+
+var _ logger.Interface = (*SlogLogger)(nil)
+
+// NewSlogLogger 创建新的slog logger
+func NewSlogLogger(level slog.Level) *SlogLogger {
+	return &SlogLogger{level: level}
+}
+
+// LogMode 设置日志级别
+func (l *SlogLogger) LogMode(level logger.LogLevel) logger.Interface {
+	switch level {
+	case logger.Silent:
+		l.level = slog.LevelError
+	case logger.Error:
+		l.level = slog.LevelError
+	case logger.Warn:
+		l.level = slog.LevelWarn
+	case logger.Info:
+		l.level = slog.LevelInfo
+	}
+	return l
+}
+
+// Info 记录信息日志
+func (l *SlogLogger) Info(ctx context.Context, msg string, data ...any) {
+	if l.level <= slog.LevelInfo {
+		slog.Info(msg, data...)
+	}
+}
+
+// Warn 记录警告日志
+func (l *SlogLogger) Warn(ctx context.Context, msg string, data ...any) {
+	if l.level <= slog.LevelWarn {
+		slog.Warn(msg, data...)
+	}
+}
+
+// Error 记录错误日志
+func (l *SlogLogger) Error(ctx context.Context, msg string, data ...any) {
+	if l.level <= slog.LevelError {
+		slog.Error(msg, data...)
+	}
+}
+
+// Trace 记录SQL跟踪日志
+func (l *SlogLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
+	if l.level <= slog.LevelInfo {
+		elapsed := time.Since(begin)
+		sql, rows := fc()
+
+		attrs := []any{
+			"elapsed", elapsed,
+			"rows", rows,
+		}
+
+		if err != nil {
+			slog.Error("SQL执行错误", append(attrs, "error", err, "sql", sql)...)
+		} else {
+			slog.Info("SQL执行", append(attrs, "sql", sql)...)
+		}
+	}
+}
 
 // NewDatabase 根据配置创建数据库连接
 func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
@@ -54,9 +121,9 @@ func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)
 	}
 
-	// 配置GORM
+	// 配置GORM，使用自定义的slog logger
 	gormConfig := &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: NewSlogLogger(slog.LevelInfo),
 	}
 
 	db, err := gorm.Open(dialector, gormConfig)
@@ -74,6 +141,6 @@ func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	log.Printf("Successfully connected to %s database", cfg.Driver)
+	slog.Info("数据库连接成功", "driver", cfg.Driver)
 	return db, nil
 }

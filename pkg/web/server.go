@@ -2,6 +2,7 @@ package web
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -12,8 +13,7 @@ import (
 
 type Server struct {
 	netService *service.NetService
-
-	echo *echo.Echo
+	echo       *echo.Echo
 }
 
 // TrafficData 用于API响应的数据结构
@@ -76,6 +76,21 @@ func slogLogger() echo.MiddlewareFunc {
 	}
 }
 
+// validateIPOrCIDR 验证输入是否为有效的IP地址或CIDR格式
+func validateIPOrCIDR(input string) error {
+	// 首先尝试解析为IP地址
+	if ip := net.ParseIP(input); ip != nil {
+		return nil
+	}
+
+	// 如果不是单个IP，尝试解析为CIDR格式
+	if _, _, err := net.ParseCIDR(input); err == nil {
+		return nil
+	}
+
+	return echo.NewHTTPError(http.StatusBadRequest, "无效的IP地址或CIDR格式")
+}
+
 func NewServer(netService *service.NetService) *Server {
 	e := echo.New()
 
@@ -92,26 +107,23 @@ func NewServer(netService *service.NetService) *Server {
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 
-	// 静态文件
-	e.Static("/static", "static")
-
-	// 路由
-	e.GET("/", svr.handleIndex)
+	// API路由
 	e.GET("/api/traffic", svr.handleGetTraffic)
 	e.POST("/api/ban", svr.handleBanIP)
 	e.POST("/api/unban", svr.handleUnbanIP)
 	e.GET("/api/banned", svr.handleGetBannedIPs)
-	e.GET("/banned", svr.handleBannedPage)
+
+	// 静态文件服务
+	e.Static("/", "web")
+
+	// 404处理 - 返回React应用的index.html
+	e.HTTPErrorHandler = svr.handle404
 
 	return svr
 }
 
 func (s *Server) Start(addr string) error {
 	return s.echo.Start(addr)
-}
-
-func (s *Server) handleIndex(c echo.Context) error {
-	return c.File("view/monitor.html")
 }
 
 func (s *Server) handleGetTraffic(c echo.Context) error {
@@ -124,6 +136,12 @@ func (s *Server) handleBanIP(c echo.Context) error {
 	if err := c.Bind(&r); err != nil || r.IP == "" {
 		return c.JSON(http.StatusOK, Error(400, "参数错误"))
 	}
+
+	// 验证IP或CIDR格式
+	if err := validateIPOrCIDR(r.IP); err != nil {
+		return c.JSON(http.StatusOK, Error(400, "无效的IP地址或CIDR格式"))
+	}
+
 	err := s.netService.BanIP(r.IP)
 	if err != nil {
 		return c.JSON(http.StatusOK, Error(500, err.Error()))
@@ -136,6 +154,12 @@ func (s *Server) handleUnbanIP(c echo.Context) error {
 	if err := c.Bind(&r); err != nil || r.IP == "" {
 		return c.JSON(http.StatusOK, Error(400, "参数错误"))
 	}
+
+	// 验证IP或CIDR格式
+	if err := validateIPOrCIDR(r.IP); err != nil {
+		return c.JSON(http.StatusOK, Error(400, "无效的IP地址或CIDR格式"))
+	}
+
 	err := s.netService.UnbanIP(r.IP)
 	if err != nil {
 		return c.JSON(http.StatusOK, Error(500, err.Error()))
@@ -151,6 +175,8 @@ func (s *Server) handleGetBannedIPs(c echo.Context) error {
 	return c.JSON(http.StatusOK, Success(ips))
 }
 
-func (s *Server) handleBannedPage(c echo.Context) error {
-	return c.File("view/banned.html")
+// handle404 处理404错误，返回React应用的index.html
+func (s *Server) handle404(err error, c echo.Context) {
+	// 非API请求返回React应用的index.html
+	c.File("web/index.html")
 }

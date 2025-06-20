@@ -1,4 +1,21 @@
-# 构建阶段
+# Node.js构建阶段 - 构建React前端
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# 复制package文件
+COPY website/package*.json ./
+
+# 安装所有依赖（包括开发依赖）
+RUN npm ci
+
+# 复制前端源代码
+COPY website/ .
+
+# 构建前端项目
+RUN npm run build
+
+# Go构建阶段
 FROM golang:1.24.3-bullseye AS builder
 
 # 安装依赖
@@ -33,8 +50,8 @@ WORKDIR /app
 
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/netbouncer .
-# 复制静态资源
-COPY --from=builder /app/view ./view
+# 从frontend-builder复制构建好的前端文件
+COPY --from=frontend-builder /app/frontend/dist ./web
 
 # 设置环境变量
 ENV GIN_MODE=release

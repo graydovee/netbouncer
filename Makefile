@@ -2,11 +2,30 @@ GIT_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "")
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 DOCKER_TAG := $(if $(GIT_TAG),$(GIT_TAG),$(if $(shell git describe --tags --abbrev=0 2>/dev/null),$(shell git describe --tags --abbrev=0)-$(GIT_COMMIT),v0.0.0-$(GIT_COMMIT)))
 
-.PHONY: build run clean tidy docker-build docker-release
+.PHONY: all build run clean tidy docker-build docker-release build-web clean-web clean-go web-dev
+
+all: build-web build
+
 tidy:
 	go mod tidy
 
-build: tidy
+# 构建React前端项目
+build-web:
+	@echo "Building React frontend..."
+	cd website && npm ci
+	cd website && npm run build
+	@echo "Copying built files to web directory..."
+	rm -rf web
+	mkdir -p web
+	cp -r website/dist/* web/
+
+# 开发模式运行前端项目
+web-dev:
+	@echo "Starting React frontend in development mode..."
+	@echo "Backend URL: $(or $(VITE_BACKEND_URL),http://localhost:8080)"
+	cd website && VITE_BACKEND_URL=$(or $(VITE_BACKEND_URL),http://localhost:8080) npm run dev
+
+build-go: tidy
 	go build -o bin/netbouncer main.go
 
 debug:
@@ -15,8 +34,15 @@ debug:
 run:
 	./bin/netbouncer
 
-clean:
+clean-web:
+	rm -rf web
+	rm -rf website/dist
+	rm -rf website/node_modules
+
+clean-go:
 	rm -f bin/netbouncer
+
+clean: clean-web clean-go
 
 # Docker相关变量
 DOCKER_IMAGE ?= graydovee/netbouncer

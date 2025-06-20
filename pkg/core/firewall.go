@@ -100,9 +100,11 @@ func (f *IptablesFirewall) Init() error {
 	}
 	if slices.Contains(chains, f.chain) {
 		// iptables -F <chain> 清空链中的所有规则
+		slog.Info("清空链中的所有规则", "cmd", "iptables -F "+f.chain)
 		_ = f.ipt.ClearChain("filter", f.chain)
 	} else {
 		// iptables -N <chain> 创建新的自定义链
+		slog.Info("创建新的自定义链", "cmd", "iptables -N "+f.chain)
 		_ = f.ipt.NewChain("filter", f.chain)
 	}
 
@@ -119,6 +121,7 @@ func (f *IptablesFirewall) Init() error {
 	// 只有在规则不存在时才插入
 	if !ruleExists {
 		// iptables -I INPUT 1 -j <chain> 在 INPUT 链的第1位插入规则，跳转到自定义链
+		slog.Info("初始化自定义链", "cmd", "iptables -I INPUT 1 -j "+f.chain)
 		_ = f.ipt.Insert("filter", "INPUT", 1, "-j", f.chain)
 	}
 
@@ -128,15 +131,24 @@ func (f *IptablesFirewall) Init() error {
 		return err
 	}
 	for _, ip := range ips {
-		err = f.Ban(ip.Ip)
+		err = f.ban(ip.Ip)
 		if err != nil {
 			_ = f.Cleanup()
 			return fmt.Errorf("初始化iptables规则失败: %w", err)
 		}
-		slog.Info("初始化iptables规则", "ip", ip.Ip)
 	}
 
 	return nil
+}
+
+func (f *IptablesFirewall) ban(ip string) error {
+	slog.Info("添加到iptables规则", "ip", ip, "cmd", "iptables -A "+f.chain+" -s "+ip+" -j DROP")
+	return f.ipt.AppendUnique("filter", f.chain, "-s", ip, "-j", "DROP")
+}
+
+func (f *IptablesFirewall) unban(ip string) error {
+	slog.Info("从iptables规则中删除", "ip", ip, "cmd", "iptables -D "+f.chain+" -s "+ip+" -j DROP")
+	return f.ipt.Delete("filter", f.chain, "-s", ip, "-j", "DROP")
 }
 
 func (f *IptablesFirewall) Ban(ip string) error {
@@ -147,8 +159,7 @@ func (f *IptablesFirewall) Ban(ip string) error {
 	}
 
 	// 添加到iptables规则
-	slog.Info("添加到iptables规则", "ip", ip)
-	err := f.ipt.AppendUnique("filter", f.chain, "-s", ip, "-j", "DROP")
+	err := f.ban(ip)
 	if err != nil {
 		return err
 	}
@@ -168,8 +179,7 @@ func (f *IptablesFirewall) Unban(ip string) error {
 	}
 
 	// 从iptables规则中删除
-	slog.Info("从iptables规则中删除", "ip", ip)
-	err := f.ipt.Delete("filter", f.chain, "-s", ip, "-j", "DROP")
+	err := f.unban(ip)
 	if err != nil {
 		return err
 	}
@@ -201,6 +211,7 @@ func (f *IptablesFirewall) Cleanup() error {
 	slog.Info("清理iptables规则")
 	// 清空自定义链中的所有规则
 	// iptables -F <chain> 清空链中的所有规则
+	slog.Info("清空自定义链中的所有规则", "cmd", "iptables -F "+f.chain)
 	_ = f.ipt.ClearChain("filter", f.chain)
 
 	// 从INPUT链移除所有指向自定义链的规则
@@ -213,10 +224,12 @@ func (f *IptablesFirewall) Cleanup() error {
 			// 没有更多匹配的规则，退出循环
 			break
 		}
+		slog.Info("清除自定义链的规则", "cmd", "iptables -D INPUT -j "+f.chain)
 	}
 
 	// 删除自定义链
 	// iptables -X <chain> 删除自定义链（链必须为空）
+	slog.Info("删除自定义链", "cmd", "iptables -X "+f.chain)
 	_ = f.ipt.DeleteChain("filter", f.chain)
 	return nil
 }
