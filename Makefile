@@ -1,6 +1,11 @@
 GIT_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "")
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
-DOCKER_TAG := $(if $(GIT_TAG),$(GIT_TAG),$(if $(shell git describe --tags --abbrev=0 2>/dev/null),$(shell git describe --tags --abbrev=0)-$(GIT_COMMIT),v0.0.0-$(GIT_COMMIT)))
+# 获取上一个tag（排除当前commit的tag）
+PREV_TAG := $(shell git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "v0.0.0")
+# 检查当前commit是否有tag
+CURRENT_COMMIT_HAS_TAG := $(shell git describe --exact-match --tags HEAD 2>/dev/null && echo "yes" || echo "no")
+# 根据规则设置DOCKER_TAG
+DOCKER_TAG := $(if $(filter yes,$(CURRENT_COMMIT_HAS_TAG)),$(GIT_TAG),$(PREV_TAG)-$(GIT_COMMIT))
 
 .PHONY: all build run clean tidy docker-build docker-release build-web clean-web clean-go web-dev
 
