@@ -8,10 +8,10 @@ import (
 
 type NetService struct {
 	monitor  *core.Monitor
-	firewall core.Firewall
+	firewall *core.Firewall
 }
 
-func NewNetService(monitor *core.Monitor, firewall core.Firewall) *NetService {
+func NewNetService(monitor *core.Monitor, firewall *core.Firewall) *NetService {
 	return &NetService{
 		monitor:  monitor,
 		firewall: firewall,

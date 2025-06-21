@@ -10,6 +10,8 @@ monitor:
 # 防火墙配置
 firewall:
   chain: "NETBOUNCER"  # iptables链名称
+  ipset: "netbouncer"  # ipset名称
+  disable_ipset: false  # 是否禁用ipset
 
 # Web服务配置
 web:

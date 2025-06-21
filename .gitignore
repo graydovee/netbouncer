@@ -5,3 +5,5 @@
 config.yaml
 netbouncer.db
 bin/
+
+vendor/

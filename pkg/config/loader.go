@@ -50,7 +50,9 @@ func DefaultConfig() *Config {
 			Timeout:        60 * 60 * 24, // 24小时
 		},
 		Firewall: FirewallConfig{
-			Chain: "NETBOUNCER",
+			Chain:        "NETBOUNCER",
+			IpSet:        "netbouncer",
+			DisableIpSet: false,
 		},
 		Web: WebConfig{
 			Listen: "0.0.0.0:8080",

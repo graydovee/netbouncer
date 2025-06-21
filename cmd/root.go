@@ -47,6 +47,8 @@ func init() {
 
 	// 防火墙配置
 	rootCmd.Flags().StringVarP(&cfg.Firewall.Chain, "firewall-chain", "n", cfg.Firewall.Chain, "iptables链名称")
+	rootCmd.Flags().StringVarP(&cfg.Firewall.IpSet, "firewall-ipset", "p", cfg.Firewall.IpSet, "ipset名称")
+	rootCmd.Flags().BoolVar(&cfg.Firewall.DisableIpSet, "firewall-disable-ipset", cfg.Firewall.DisableIpSet, "是否禁用ipset")
 
 	// Web配置
 	rootCmd.Flags().StringVarP(&cfg.Web.Listen, "listen", "l", cfg.Web.Listen, "Web服务监听地址")
@@ -127,7 +129,7 @@ func run() error {
 	defer mon.Stop()
 
 	// 创建防火墙
-	fw, err := core.NewFirewall(cfg)
+	fw, err := core.NewFirewallFromConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("创建防火墙失败: %w", err)
 	}

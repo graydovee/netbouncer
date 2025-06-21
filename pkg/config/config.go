@@ -19,7 +19,9 @@ type MonitorConfig struct {
 
 // FirewallConfig 防火墙配置
 type FirewallConfig struct {
-	Chain string `yaml:"chain"` // iptables链名称
+	Chain        string `yaml:"chain"`         // iptables链名称
+	IpSet        string `yaml:"ipset"`         // ipset名称，如果设置则使用ipset
+	DisableIpSet bool   `yaml:"disable_ipset"` // 是否禁用ipset
 }
 
 // WebConfig Web服务配置
