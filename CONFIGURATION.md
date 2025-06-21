@@ -50,6 +50,8 @@ monitor:
 ```yaml
 firewall:
   chain: "NETBOUNCER"  # iptables链名称
+  ipset: "netbouncer"  # ipset名称
+  type: "ipset"        # 防火墙类型：iptables, ipset, mock
 ```
 
 ### Web服务配置 (web)
@@ -59,25 +61,17 @@ web:
   listen: "0.0.0.0:8080"  # Web服务监听地址
 ```
 
-### 存储配置 (storage)
+### 数据库配置 (database)
 
 ```yaml
-storage:
-  type: "database"  # 存储类型：memory 或 database
-  database:
-    driver: "sqlite"        # 数据库驱动
-    host: ""                # 数据库主机地址
-    port: 0                 # 数据库端口号
-    username: ""            # 数据库用户名
-    password: ""            # 数据库密码
-    database: "netbouncer.db"  # 数据库名称或文件路径
-    dsn: ""                 # 数据库连接字符串
-```
-
-### 调试配置 (debug)
-
-```yaml
-debug: false  # 是否启用调试模式
+database:
+  driver: "sqlite"        # 数据库驱动：sqlite, mysql, postgres
+  host: ""                # 数据库主机地址
+  port: 0                 # 数据库端口号
+  username: ""            # 数据库用户名
+  password: ""            # 数据库密码
+  database: "netbouncer.db"  # 数据库名称或文件路径
+  dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
 ```
 
 ## 命令行参数
@@ -96,14 +90,12 @@ debug: false  # 是否启用调试模式
 ### 防火墙参数
 
 - `-n, --firewall-chain`: iptables链名称
+- `-p, --firewall-ipset`: ipset名称
+- `-f, --firewall-type`: 防火墙类型 (iptables|ipset|mock)
 
 ### Web服务参数
 
 - `-l, --listen`: Web服务监听地址
-
-### 存储参数
-
-- `-s, --storage`: 存储类型 (memory|database)
 
 ### 数据库参数
 
@@ -114,10 +106,6 @@ debug: false  # 是否启用调试模式
 - `--db-password`: 数据库密码
 - `--db-name`: 数据库名称或文件路径
 - `--db-dsn`: 数据库连接字符串
-
-### 调试参数
-
-- `--debug`: 启用调试模式
 
 ## 使用示例
 
@@ -137,11 +125,11 @@ vim config.yaml
 ### 2. 使用命令行参数启动
 
 ```bash
-# 使用内存存储
-./netbouncer -s memory --debug
+# 使用SQLite数据库
+./netbouncer --db-driver sqlite --db-name myapp.db
 
-# 使用数据库存储
-./netbouncer -s database --db-driver sqlite --db-name myapp.db
+# 使用MySQL数据库
+./netbouncer --db-driver mysql --db-host localhost --db-port 3306 --db-username netbouncer --db-password password --db-name netbouncer
 
 # 指定网络接口和监听地址
 ./netbouncer -i eth0 -l 0.0.0.0:9090
@@ -149,15 +137,98 @@ vim config.yaml
 # 排除特定子网
 ./netbouncer -e "127.0.0.1/8,192.168.0.0/16"
 
-# 设置防火墙链名称
-./netbouncer -n MYCHAIN
+# 使用iptables防火墙
+./netbouncer -f iptables -n MYCHAIN
+
+# 使用mock防火墙（调试模式）
+./netbouncer -f mock
 ```
 
 ### 3. 混合使用配置文件和命令行参数
 
 ```bash
 # 使用配置文件，但覆盖某些参数
-./netbouncer -c config.yaml --debug -l 0.0.0.0:9090
+./netbouncer -c config.yaml -f mock -l 0.0.0.0:9090
+```
+
+## 防火墙类型说明
+
+### ipset模式（默认）
+
+使用ipset进行IP封禁，性能更好，适合高并发场景：
+
+```yaml
+firewall:
+  type: "ipset"
+  ipset: "netbouncer"  # ipset名称
+```
+
+### iptables模式
+
+使用iptables进行IP封禁，适合大多数Linux系统：
+
+```yaml
+firewall:
+  type: "iptables"
+  chain: "NETBOUNCER"  # 自定义iptables链名称
+```
+
+### mock模式
+
+模拟防火墙操作，不实际执行封禁，适合开发和测试：
+
+```yaml
+firewall:
+  type: "mock"
+```
+
+## 数据库配置详解
+
+### SQLite（默认）
+
+适合单机部署，无需额外配置：
+
+```yaml
+database:
+  driver: "sqlite"
+  database: "netbouncer.db"  # SQLite数据库文件路径
+```
+
+### MySQL
+
+适合生产环境，支持高并发：
+
+```yaml
+database:
+  driver: "mysql"
+  host: "localhost"
+  port: 3306
+  username: "netbouncer"
+  password: "password"
+  database: "netbouncer"
+```
+
+### PostgreSQL
+
+适合复杂查询场景：
+
+```yaml
+database:
+  driver: "postgres"
+  host: "localhost"
+  port: 5432
+  username: "netbouncer"
+  password: "password"
+  database: "netbouncer"
+```
+
+### 使用DSN连接字符串
+
+DSN连接字符串的优先级高于其他配置：
+
+```yaml
+database:
+  dsn: "mysql://user:password@localhost:3306/netbouncer"
 ```
 
 ## 配置结构优化说明
@@ -165,9 +236,9 @@ vim config.yaml
 ### 主要改进
 
 1. **配置结构简化**: 将网络和监控配置合并为 `MonitorConfig`
-2. **数据库配置嵌套**: 将 `DatabaseConfig` 放入 `StorageConfig` 中，使结构更清晰
-3. **字段名统一**: 统一使用更直观的字段名，如 `exclude_subnets` 替代 `ignored_subnets`
-4. **默认值管理**: 使用 `config.DefaultConfig()` 统一管理默认值
+2. **数据库配置独立**: 将 `DatabaseConfig` 独立出来，使结构更清晰
+3. **防火墙类型支持**: 新增防火墙类型配置，支持iptables、ipset和mock
+4. **字段名统一**: 统一使用更直观的字段名
 5. **参数分组**: Monitor和Firewall参数使用前缀进行分组
 
 ### 配置结构对比
@@ -198,11 +269,14 @@ monitor:
   window: 60
   timeout: 86400
 
-storage:
-  type: "database"
-  database:
-    driver: "sqlite"
-    # ...
+firewall:
+  type: "ipset"
+  chain: "NETBOUNCER"
+  ipset: "netbouncer"
+
+database:
+  driver: "sqlite"
+  # ...
 ```
 
 ### 参数名改进
@@ -217,11 +291,11 @@ storage:
 | `--connection-timeout` | `--monitor-timeout` | 简化参数名，添加分组前缀 |
 | `--netbouncer-chain` | `--firewall-chain` | 简化参数名，添加分组前缀 |
 | `--addr` | `--listen` | 更准确地描述监听行为 |
-| `--storage-type` | `--storage` | 简化参数名 |
+| `--storage-type` | `--db-driver` | 更准确的术语 |
 | `--db-type` | `--db-driver` | 更准确的术语 |
 | `--db-user` | `--db-username` | 更完整的参数名 |
 | `--db-pass` | `--db-password` | 更完整的参数名 |
-| `--db-name` | `--db-database` | 更清晰的语义 |
+| `--db-name` | `--db-name` | 保持一致性 |
 | `--db-conn` | `--db-dsn` | 更标准的缩写 |
 
 ### 短参数优化
@@ -235,6 +309,8 @@ storage:
 | `--monitor-window` | `-w` | 监控窗口 |
 | `--monitor-timeout` | `-t` | 超时时间 |
 | `--firewall-chain` | `-n` | 防火墙链 |
+| `--firewall-ipset` | `-p` | ipset名称 |
+| `--firewall-type` | `-f` | 防火墙类型 |
 | `--listen` | `-l` | 监听地址 |
 
 ### 参数分组说明
@@ -242,8 +318,9 @@ storage:
 为了更好地组织参数，我们对参数进行了分组：
 
 - **监控参数**: 以 `monitor-` 开头，包括网络接口、排除子网、监控窗口、超时时间等
-- **防火墙参数**: 以 `firewall-` 开头，包括iptables链名称等
-- **其他参数**: 保持原有的命名方式，如Web服务、存储、数据库等
+- **防火墙参数**: 以 `firewall-` 开头，包括iptables链名称、ipset名称、防火墙类型等
+- **数据库参数**: 以 `db-` 开头，包括数据库连接相关配置
+- **其他参数**: 保持原有的命名方式，如Web服务等
 
 ## 配置验证
 
@@ -283,10 +360,26 @@ ls -la config.yaml
 chmod 644 config.yaml
 ```
 
+### 防火墙权限问题
+
+使用iptables或ipset需要root权限：
+
+```bash
+# 使用sudo运行
+sudo ./netbouncer
+
+# 或者使用mock模式进行测试
+./netbouncer -f mock
+```
+
 ## 最佳实践
 
-1. **开发环境**: 使用内存存储和调试模式
-2. **生产环境**: 使用数据库存储确保数据持久化
+1. **开发环境**: 使用mock防火墙模式和SQLite数据库
+2. **生产环境**: 使用iptables或ipset防火墙和MySQL/PostgreSQL数据库
 3. **配置文件**: 将敏感信息（如数据库密码）通过环境变量或命令行参数传递
 4. **版本控制**: 不要将包含敏感信息的配置文件提交到版本控制系统
-5. **备份**: 定期备份重要的配置文件 
+5. **备份**: 定期备份重要的配置文件和数据
+6. **防火墙选择**: 
+   - 单机部署：使用iptables
+   - 高并发场景：使用ipset
+   - 开发和测试：使用mock 

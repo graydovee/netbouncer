@@ -11,7 +11,7 @@ monitor:
 firewall:
   chain: "NETBOUNCER"  # iptables链名称
   ipset: "netbouncer"  # ipset名称
-  disable_ipset: false  # 是否禁用ipset
+  type: "ipset"        # 防火墙类型：iptables, ipset, mock
 
 # Web服务配置
 web:
@@ -27,36 +27,48 @@ database:
   database: "netbouncer.db"  # 数据库名称或文件路径
   dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
 
-# 使用内存存储的配置示例：
-# storage:
-#   type: "memory"
+# 防火墙类型配置示例：
 
-# 使用SQLite的配置示例：
-# storage:
-#   type: "database"
-#   database:
-#     driver: "sqlite"
-#     database: "netbouncer.db"  # SQLite数据库文件路径
-#     # 其他字段对于SQLite可以留空
+# ipset模式（默认，高性能）
+# firewall:
+#   type: "ipset"
+#   ipset: "netbouncer"
 
-# 使用MySQL的配置示例：
-# storage:
-#   type: "database"
-#   database:
-#     driver: "mysql"
-#     host: "localhost"
-#     port: 3306
-#     username: "netbouncer"
-#     password: "password"
-#     database: "netbouncer"
+# iptables模式（兼容性好）
+# firewall:
+#   type: "iptables"
+#   chain: "NETBOUNCER"
 
-# 使用PostgreSQL的配置示例：
-# storage:
-#   type: "database"
-#   database:
-#     driver: "postgres"
-#     host: "localhost"
-#     port: 5432
-#     username: "netbouncer"
-#     password: "password"
-#     database: "netbouncer" 
+# mock模式（调试用）
+# firewall:
+#   type: "mock"
+
+# 数据库配置示例：
+
+# SQLite数据库（默认，适合单机部署）
+# database:
+#   driver: "sqlite"
+#   database: "netbouncer.db"  # SQLite数据库文件路径
+#   # 其他字段对于SQLite可以留空
+
+# MySQL数据库（适合生产环境）
+# database:
+#   driver: "mysql"
+#   host: "localhost"
+#   port: 3306
+#   username: "netbouncer"
+#   password: "password"
+#   database: "netbouncer"
+
+# PostgreSQL数据库（适合复杂查询）
+# database:
+#   driver: "postgres"
+#   host: "localhost"
+#   port: 5432
+#   username: "netbouncer"
+#   password: "password"
+#   database: "netbouncer"
+
+# 使用DSN连接字符串（优先级最高）
+# database:
+#   dsn: "mysql://user:password@localhost:3306/netbouncer" 

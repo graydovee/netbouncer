@@ -4,27 +4,31 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](Dockerfile)
 
-NetBouncer 是一个高性能的网络流量监控工具，提供实时流量统计、IP封禁管理和现代化的Web界面。它能够监控网络接口的流量，识别异常连接，并提供基于iptables的防火墙功能。
+[English](README.md) | [中文](README_zh.md)
 
-## ✨ 主要特性
+NetBouncer is a high-performance network traffic monitoring tool that provides real-time traffic statistics, IP management, and a modern web interface. It supports iptables/ipset firewall, IP group management, batch operations, and more.
 
-- 🔍 **实时流量监控**: 基于libpcap的高性能网络包捕获
-- 📊 **可视化界面**: 现代化的React Web界面，实时显示流量统计
-- 🛡️ **IP封禁管理**: 支持单个IP或CIDR网段的封禁/解封
-- ⚡ **高性能**: 使用Go语言开发，支持高并发流量处理
-- 🗄️ **多存储后端**: 支持内存存储和数据库存储（SQLite/MySQL/PostgreSQL）
-- 🔧 **灵活配置**: 支持配置文件、命令行参数和Docker部署
-- 📱 **响应式设计**: 适配桌面和移动设备的Web界面
+## ✨ Key Features
 
-## 🚀 快速开始
+- 🔍 **Real-time Traffic Monitoring**: High-performance network packet capture based on libpcap
+- 📊 **Visual Interface**: Modern React web interface with real-time traffic statistics
+- 🛡️ **IP Management**: Support for banning/allowing individual IPs or CIDR ranges
+- 📁 **Group Management**: IP group management for batch operations
+- ⚡ **High Performance**: Built with Go, supporting high-concurrency traffic processing
+- 🗄️ **Multiple Storage Backends**: Support for SQLite, MySQL, PostgreSQL databases
+- 🔧 **Flexible Configuration**: Support for config files, command-line parameters, and Docker deployment
+- 📱 **Responsive Design**: Web interface adapted for desktop and mobile devices
+- 🛡️ **Multiple Firewall Types**: Support for iptables, ipset, and mock modes
 
-### 使用Docker（推荐）
+## 🚀 Quick Start
+
+### Option 1: Using Docker (Recommended)
 
 ```bash
-# 拉取最新镜像
+# Pull the latest image
 docker pull graydovee/netbouncer:latest
 
-# 运行容器
+# Run container
 docker run -d \
   --name netbouncer \
   --network host \
@@ -32,187 +36,184 @@ docker run -d \
   --cap-add=NET_RAW \
   graydovee/netbouncer:latest
 
-# 访问Web界面
+# Access web interface
 # http://localhost:8080
 ```
 
-### 从源码构建
+### Option 2: Build from Source
 
-#### 前置要求
+#### Prerequisites
 
 - Go 1.24.3+
-- Node.js 18+ (用于构建前端)
+- Node.js 18+ (for building frontend)
 - libpcap-dev (Linux)
-- iptables (用于防火墙功能)
+- iptables/ipset (for firewall functionality)
 
-#### 构建步骤
+#### Build Steps
 
 ```bash
-# 克隆仓库
+# 1. Clone repository
 git clone https://github.com/graydovee/netbouncer.git
 cd netbouncer
 
-# 构建前端和后端
+# 2. Build frontend and backend
 make all
 
-# 运行应用
+# 3. Run application
 ./bin/netbouncer
 ```
 
-## 📖 使用指南
+## 📖 Usage Guide
 
-### 基本使用
+### Basic Usage
 
 ```bash
-# 使用默认配置启动
+# Start with default configuration (ipset mode)
 netbouncer
 
-# 使用配置文件
+# Start with config file
 netbouncer -c config.yaml
 
-# 指定网络接口和监听地址
+# Specify network interface and listen address
 netbouncer -i eth0 -l 0.0.0.0:9090
 
-# 排除特定网段
-netbouncer -e "127.0.0.1/8,192.168.0.0/16"
+# Use iptables firewall mode
+netbouncer --firewall-type iptables
 
-# 调试模式（不真正设置防护墙）
-netbouncer --debug
+# Use mock mode (for debugging)
+netbouncer --firewall-type mock
 ```
 
-### 配置文件
+### Configuration File Setup
 
-创建 `config.yaml` 文件：
+Create a `config.yaml` file:
 
 ```yaml
-# 监控配置
+# Monitor configuration
 monitor:
-  interface: "eth0"  # 网络接口名称（留空自动选择）
+  interface: "eth0"  # Network interface name (leave empty for auto-selection)
   exclude_subnets: "127.0.0.1/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-  window: 60  # 监控时间窗口（秒）
-  timeout: 86400  # 连接超时时间（秒）
+  window: 60  # Monitoring time window (seconds)
+  timeout: 86400  # Time to clean up inactive connections (seconds)
 
-# 防火墙配置
+# Firewall configuration
 firewall:
-  chain: "NETBOUNCER"  # iptables链名称
+  chain: "NETBOUNCER"  # iptables chain name
+  ipset: "netbouncer"  # ipset name
+  type: "ipset"        # Firewall type: iptables, ipset, mock
 
-# Web服务配置
+# Web service configuration
 web:
-  listen: "0.0.0.0:8080"  # Web服务监听地址
+  listen: "0.0.0.0:8080"  # Web service listen address
 
-# 存储配置
-storage:
-  type: "database"  # "memory" 或 "database"
-  database:
-    driver: "sqlite"
-    database: "netbouncer.db"
-
-# 调试模式
-debug: false
+# Database configuration
+database:
+  driver: "sqlite"        # "sqlite", "mysql", "postgres"
+  host: ""                # Database host address
+  port: 0                 # Database port
+  username: ""            # Database username
+  password: ""            # Database password
+  database: "netbouncer.db"  # Database name or file path
+  dsn: ""                 # Database connection string (optional)
 ```
 
-### 命令行参数
+### Common Command Line Parameters
 
-| 参数 | 简写 | 说明 | 默认值 |
-|------|------|------|--------|
-| `--config` | `-c` | 配置文件路径 | - |
-| `--monitor-interface` | `-i` | 网络接口名称 | 自动选择 |
-| `--monitor-exclude-subnets` | `-e` | 排除的子网 | - |
-| `--monitor-window` | `-w` | 监控时间窗口（秒） | 60 |
-| `--monitor-timeout` | `-t` | 连接超时时间（秒） | 86400 |
-| `--firewall-chain` | `-n` | iptables链名称 | NETBOUNCER |
-| `--listen` | `-l` | Web服务监听地址 | 0.0.0.0:8080 |
-| `--storage` | `-s` | 存储类型 | memory |
-| `--debug` | - | 启用调试模式 | false |
+| Parameter | Short | Description | Default |
+|-----------|-------|-------------|---------|
+| `--config` | `-c` | Config file path | - |
+| `--monitor-interface` | `-i` | Network interface name | Auto-select |
+| `--monitor-exclude-subnets` | `-e` | Excluded subnets | - |
+| `--firewall-type` | `-f` | Firewall type (iptables\|ipset\|mock) | ipset |
+| `--listen` | `-l` | Web service listen address | 0.0.0.0:8080 |
+| `--db-driver` | - | Database driver (sqlite\|mysql\|postgres) | sqlite |
+| `--db-name` | - | Database name or file path | netbouncer.db |
 
-## 🌐 Web界面
+## 🌐 Web Interface Usage
 
-NetBouncer 提供了现代化的Web界面，包含以下功能：
+After starting the application, visit `http://localhost:8080` to access the web interface:
 
-### 流量监控页面
-- 实时流量统计图表
-- 按IP地址的流量详情
-- 连接数和数据包统计
-- 流量速率监控
+### Traffic Monitor Page
+- View real-time network connection traffic statistics
+- Sort by traffic, connections, and other fields
+- Configurable auto-refresh interval
+- One-click IP ban functionality
 
-### IP封禁管理页面
-- 查看已封禁的IP列表
-- 添加新的IP封禁规则
-- 解除IP封禁
-- 支持CIDR网段封禁
+### IP Management Page
+- View all IPs or by group
+- Add new IP addresses or CIDR ranges
+- Modify IP behavior (ban/allow)
+- Change IP group membership
+- Batch operations and bulk import
 
-### API接口
+### Group Management Page
+- Create, edit, and delete IP groups
+- View group lists and group information
 
-```bash
-# 获取流量统计
-GET /api/traffic
+## 🗄️ Database Configuration
 
-# 封禁IP
-POST /api/ban
-Content-Type: application/json
-{"ip": "192.168.1.100"}
-
-# 解封IP
-POST /api/unban
-Content-Type: application/json
-{"ip": "192.168.1.100"}
-
-# 获取已封禁IP列表
-GET /api/banned
-```
-
-## 🗄️ 存储配置
-
-### 内存存储
+### SQLite (Default, Recommended)
 
 ```yaml
-storage:
-  type: "memory"
+database:
+  driver: "sqlite"
+  database: "netbouncer.db"
 ```
 
-### SQLite数据库（默认）
+### MySQL
 
 ```yaml
-storage:
-  type: "database"
-  database:
-    driver: "sqlite"
-    database: "netbouncer.db"
+database:
+  driver: "mysql"
+  host: "localhost"
+  port: 3306
+  username: "netbouncer"
+  password: "password"
+  database: "netbouncer"
 ```
 
-### MySQL数据库
+### PostgreSQL
 
 ```yaml
-storage:
-  type: "database"
-  database:
-    driver: "mysql"
-    host: "localhost"
-    port: 3306
-    username: "netbouncer"
-    password: "password"
-    database: "netbouncer"
+database:
+  driver: "postgres"
+  host: "localhost"
+  port: 5432
+  username: "netbouncer"
+  password: "password"
+  database: "netbouncer"
 ```
 
-### PostgreSQL数据库
+## 🛡️ Firewall Configuration
+
+### ipset Mode (Default)
 
 ```yaml
-storage:
-  type: "database"
-  database:
-    driver: "postgres"
-    host: "localhost"
-    port: 5432
-    username: "netbouncer"
-    password: "password"
-    database: "netbouncer"
+firewall:
+  type: "ipset"
+  ipset: "netbouncer"
 ```
 
-## 🐳 Docker部署
+### iptables Mode
 
-### 使用Docker Compose
+```yaml
+firewall:
+  type: "iptables"
+  chain: "NETBOUNCER"
+```
 
-创建 `docker-compose.yml`：
+### mock Mode (Debug)
+
+```yaml
+firewall:
+  type: "mock"
+```
+
+## 🐳 Docker Deployment
+
+### Using Docker Compose
+
+Create `docker-compose.yml`:
 
 ```yaml
 version: '3.8'
@@ -232,105 +233,72 @@ services:
     restart: unless-stopped
 ```
 
-### 多平台构建
+Run:
+```bash
+docker-compose up -d
+```
+
+## 🔧 Development
+
+### Development Environment Setup
 
 ```bash
-# 构建多平台镜像
-make docker-release
-
-# 构建本地镜像
-make docker-build
-```
-
-## 🔧 开发
-
-### 项目结构
-
-```
-netbouncer/
-├── cmd/                    # 命令行入口
-├── pkg/                    # 核心包
-│   ├── config/            # 配置管理
-│   ├── core/              # 核心功能（监控、防火墙）
-│   ├── service/           # 业务逻辑服务
-│   ├── store/             # 数据存储
-│   └── web/               # Web服务器
-├── website/               # React前端源码
-├── web/                   # 构建后的前端文件
-└── main.go               # 主程序入口
-```
-
-### 开发环境设置
-
-```bash
-# 安装Go依赖
+# Install Go dependencies
 go mod tidy
 
-# 启动前端开发服务器
+# Start frontend development server
 make web-dev
 
-# 运行后端（调试模式）
-make debug
+# Run backend (mock mode)
+./bin/netbouncer --firewall-type mock
 ```
 
-### 构建
+### Build
 
 ```bash
-# 构建所有组件
+# Build all components
 make all
 
-# 仅构建Go程序
+# Build Go program only
 make build-go
 
-# 仅构建前端
+# Build frontend only
 make build-web
 ```
 
-## 📊 性能特性
+## 📊 API Interface
 
-- **高并发处理**: 使用Go协程处理网络包
-- **内存优化**: 滑动窗口算法减少内存占用
-- **实时统计**: 毫秒级的流量统计更新
-- **低延迟**: 基于libpcap的高效包捕获
+For detailed API documentation, see [API.md](API.md)
 
-## 🔒 安全特性
+Main API endpoints:
+- `GET /api/traffic` - Get traffic statistics
+- `GET /api/ip` - Get IP list
+- `POST /api/ip` - Create IP rule
+- `GET /api/group` - Get group list
+- `POST /api/group` - Create group
 
-- **IP封禁**: 基于iptables的网络层封禁
-- **子网过滤**: 支持排除内网和本地网段
-- **连接超时**: 自动清理过期连接
-- **访问控制**: Web界面访问控制
+## 🔒 Security Notes
 
-## 🤝 贡献
+- Using iptables or ipset requires root privileges
+- Production environments should use database storage
+- Regularly backup configuration files and data
+- Do not commit configuration files with sensitive information to version control
 
-欢迎提交Issue和Pull Request！
+## 🤝 Contributing
 
-### 开发流程
+Issues and Pull Requests are welcome!
 
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开 Pull Request
+## 📄 License
 
-## 📄 许可证
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+## 📞 Support
 
-## 🙏 致谢
-
-- [gopacket](https://github.com/google/gopacket) - 网络包处理
-- [Echo](https://echo.labstack.com/) - Web框架
-- [Material-UI](https://mui.com/) - React UI组件库
-- [React](https://reactjs.org/) - 前端框架
-
-## 📞 支持
-
-如果您遇到问题或有建议，请：
-
-1. 查看 [Issues](https://github.com/graydovee/netbouncer/issues)
-2. 创建新的 Issue
-3. 联系维护者
+- Check [Issues](https://github.com/graydovee/netbouncer/issues)
+- Create a new Issue
+- See [CONFIGURATION.md](CONFIGURATION.md) for detailed configuration
+- See [API.md](API.md) for API interface
 
 ---
 
-**NetBouncer** - 让网络监控变得简单高效 🚀 
+**NetBouncer** - Making network monitoring simple and efficient 🚀 

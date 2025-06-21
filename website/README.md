@@ -1,15 +1,18 @@
 # 网络监控系统 - React前端
 
-这是网络监控系统的React前端应用，提供了现代化的用户界面来管理网络流量监控和IP禁用功能。
+这是网络监控系统的React前端应用，提供了现代化的用户界面来管理网络流量监控和IP管理功能。
 
 ## 功能特性
 
 - 🖥️ **网络流量监控**: 实时显示网络连接数据，支持排序和自动刷新
-- 🚫 **IP禁用管理**: 管理已禁用的IP地址列表
+- 🚫 **IP管理**: 管理IP地址列表，支持封禁和允许两种行为
+- 📁 **分组管理**: 支持IP分组管理，便于批量操作
 - 📱 **响应式设计**: 支持桌面和移动设备
 - 🎨 **现代化UI**: 使用Material-UI组件库
 - 🔄 **实时更新**: 支持自动刷新和手动刷新
 - 📊 **数据排序**: 支持多列数据排序
+- 🔧 **批量操作**: 支持批量修改IP行为和所属组
+- 📥 **批量导入**: 支持批量导入IP地址
 
 ## 技术栈
 
@@ -59,10 +62,14 @@ npm run preview
 ```
 src/
 ├── components/          # 通用组件
-│   └── Layout.jsx      # 主布局组件（包含导航栏）
+│   ├── Layout.jsx      # 主布局组件（包含导航栏）
+│   ├── ConfirmDialog.jsx # 确认对话框组件
+│   └── MessageSnackbar.jsx # 消息提示组件
 ├── pages/              # 页面组件
 │   ├── TrafficMonitor.jsx  # 网络流量监控页面
-│   └── BannedIPs.jsx       # 已禁用IP管理页面
+│   ├── IPManagement.jsx    # IP管理页面
+│   ├── GroupManagement.jsx # 组管理页面
+│   └── NotFound.jsx        # 404页面
 ├── App.jsx             # 主应用组件
 └── main.jsx            # 应用入口
 ```
@@ -71,10 +78,23 @@ src/
 
 应用需要后端提供以下API接口：
 
+### 流量监控
 - `GET /api/traffic` - 获取网络流量数据
-- `GET /api/banned` - 获取已禁用IP列表
-- `POST /api/ban` - 禁用指定IP
-- `POST /api/unban` - 解禁指定IP
+
+### IP管理
+- `GET /api/ip` - 获取所有IP列表
+- `GET /api/ip/:groupId` - 根据组ID获取IP列表
+- `POST /api/ip` - 创建IP规则
+- `DELETE /api/ip/:id` - 删除IP规则
+- `GET /api/ip/action` - 获取可用操作列表
+- `PUT /api/ip/action` - 更新IP行为
+- `PUT /api/ip/group` - 更新IP所属组
+
+### 组管理
+- `GET /api/group` - 获取所有组列表
+- `POST /api/group` - 创建新组
+- `PUT /api/group` - 更新组信息
+- `DELETE /api/group/:id` - 删除组
 
 ## 配置
 
@@ -93,83 +113,134 @@ server: {
 }
 ```
 
-如果后端服务运行在不同的端口，请相应修改 `target` 地址。
+### 环境变量
 
-## 使用说明
+可以通过环境变量配置后端地址：
 
-### 网络流量监控
+```bash
+# 设置后端地址
+export VITE_BACKEND_URL=http://localhost:8080
 
-1. 页面会自动加载网络流量数据
-2. 可以设置自动刷新间隔（默认30秒）
-3. 点击表头可以按列排序
-4. 点击"禁用"按钮可以禁用指定IP
+# 启动开发服务器
+npm run dev
+```
 
-### 已禁用IP管理
+## 页面功能说明
 
-1. 查看所有已禁用的IP地址
-2. 点击"解禁"按钮可以解除IP禁用
-3. 点击"刷新列表"可以手动更新数据
+### 流量监控页面 (TrafficMonitor)
 
-## 开发说明
+- **实时流量显示**: 显示所有网络连接的流量统计
+- **数据排序**: 支持按流量、连接数等字段排序
+- **自动刷新**: 可配置自动刷新间隔
+- **一键封禁**: 点击按钮快速封禁IP
+- **状态显示**: 显示IP是否已被封禁
+
+### IP管理页面 (IPManagement)
+
+- **IP列表管理**: 查看所有IP或按组查看
+- **创建IP规则**: 添加新的IP地址或CIDR网段
+- **删除IP规则**: 删除不需要的IP规则
+- **修改IP行为**: 在封禁和允许之间切换
+- **修改所属组**: 将IP移动到不同的组
+- **批量操作**: 批量修改IP行为和所属组
+- **批量导入**: 支持批量导入IP地址列表
+
+### 组管理页面 (GroupManagement)
+
+- **组列表**: 显示所有IP分组
+- **创建组**: 创建新的IP分组
+- **编辑组**: 修改组名称和描述
+- **删除组**: 删除不需要的组
+
+## 组件说明
+
+### Layout组件
+
+主布局组件，包含：
+- 响应式侧边栏导航
+- 顶部应用栏
+- 移动端适配
+
+### ConfirmDialog组件
+
+确认对话框组件，用于：
+- 删除确认
+- 危险操作确认
+- 自定义确认消息
+
+### MessageSnackbar组件
+
+消息提示组件，用于：
+- 操作成功提示
+- 错误信息显示
+- 警告信息显示
+
+## 开发指南
 
 ### 添加新页面
 
 1. 在 `src/pages/` 目录下创建新的页面组件
-2. 在 `src/components/Layout.jsx` 中的 `menuItems` 数组中添加菜单项
-3. 在 `src/App.jsx` 中添加对应的路由
+2. 在 `src/App.jsx` 中添加路由
+3. 在 `src/components/Layout.jsx` 中添加导航菜单项
 
-### 自定义主题
+### 添加新API调用
 
-可以在 `src/App.jsx` 中修改 `theme` 对象来自定义Material-UI主题。
+1. 在页面组件中添加API调用函数
+2. 使用 `fetch` 或 `axios` 进行HTTP请求
+3. 处理响应数据和错误情况
+
+### 样式定制
+
+项目使用Material-UI主题系统，可以通过以下方式定制样式：
+
+1. 修改 `src/App.jsx` 中的主题配置
+2. 使用 `sx` 属性进行内联样式
+3. 使用 `styled` 组件创建自定义组件
+
+## 构建和部署
+
+### 构建生产版本
+
+```bash
+npm run build
+```
+
+### 部署到静态服务器
+
+将 `dist` 目录中的文件部署到任何静态文件服务器即可。
+
+### Docker部署
+
+```dockerfile
+FROM nginx:alpine
+COPY dist/ /usr/share/nginx/html/
+COPY nginx.conf /etc/nginx/nginx.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
 
 ## 故障排除
 
-### 常见问题
+### 开发环境问题
 
-1. **API请求失败**: 检查后端服务是否运行，以及代理配置是否正确
-2. **页面无法加载**: 确保所有依赖已正确安装
-3. **样式问题**: 确保Material-UI依赖已正确安装
+1. **端口冲突**: 修改 `vite.config.js` 中的端口配置
+2. **API代理失败**: 检查后端服务是否正常运行
+3. **依赖安装失败**: 清除 `node_modules` 重新安装
 
-### 调试
+### 生产环境问题
 
-- 使用浏览器开发者工具查看网络请求和控制台错误
-- 检查Vite开发服务器的代理配置
-- 确认后端API接口返回正确的JSON格式
+1. **路由404**: 确保服务器配置了正确的重写规则
+2. **API请求失败**: 检查CORS配置和API地址
+3. **静态资源加载失败**: 检查构建路径配置
 
-# 前端项目使用说明
+## 贡献指南
 
-## 开发模式
+1. Fork 项目
+2. 创建功能分支
+3. 提交更改
+4. 推送到分支
+5. 创建 Pull Request
 
-### 使用默认后端地址（localhost:8080）
-```bash
-make web-dev
-```
+## 许可证
 
-### 使用自定义后端地址
-```bash
-VITE_BACKEND_URL=http://192.168.1.100:8080 make web-dev
-```
-
-### 直接使用npm
-```bash
-cd website
-VITE_BACKEND_URL=http://192.168.1.100:8080 npm run dev
-```
-
-## 构建生产版本
-
-```bash
-make build-web
-```
-
-构建后的文件会自动复制到 `web/` 目录，供Go后端服务。
-
-## 环境变量
-
-- `VITE_BACKEND_URL`: 后端服务地址，默认为 `http://localhost:8080`
-
-## 注意事项
-
-1. 开发模式下，前端会通过Vite的proxy功能代理API请求到后端
-2. 生产构建时，API请求使用相对路径（如 `/api/traffic`），由Go后端直接处理
-3. 前端代码中的API调用都是相对路径，无需修改
+本项目采用 MIT 许可证。

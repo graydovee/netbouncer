@@ -49,7 +49,7 @@ func init() {
 	// 防火墙配置
 	rootCmd.Flags().StringVarP(&cfg.Firewall.Chain, "firewall-chain", "n", cfg.Firewall.Chain, "iptables链名称")
 	rootCmd.Flags().StringVarP(&cfg.Firewall.IpSet, "firewall-ipset", "p", cfg.Firewall.IpSet, "ipset名称")
-	rootCmd.Flags().StringVarP(&cfg.Firewall.Type, "firewall-type", "f", string(cfg.Firewall.Type), "防火墙类型 (iptables|ipset|mock)")
+	rootCmd.Flags().StringVarP(&cfg.Firewall.Type, "firewall-type", "f", cfg.Firewall.Type, "防火墙类型 (iptables|ipset|mock)")
 
 	// Web配置
 	rootCmd.Flags().StringVarP(&cfg.Web.Listen, "listen", "l", cfg.Web.Listen, "Web服务监听地址")
@@ -64,7 +64,7 @@ func init() {
 	rootCmd.Flags().StringVar(&cfg.Database.DSN, "db-dsn", cfg.Database.DSN, "数据库连接字符串")
 
 	// 添加使用示例
-	rootCmd.Example = `  # 使用默认配置启动
+	rootCmd.Example = `  # 使用默认配置启动（ipset模式）
   netbouncer
 
   # 生成默认配置文件
@@ -76,14 +76,17 @@ func init() {
   # 指定网络接口和监听地址
   netbouncer -i eth0 -l 0.0.0.0:9090
 
-  # 使用数据库存储
-  netbouncer -s database --db-driver sqlite --db-name myapp.db
+  # 使用iptables防火墙模式
+  netbouncer -f iptables
+
+  # 使用mock模式（调试用）
+  netbouncer -f mock
 
   # 排除特定子网
   netbouncer -e "127.0.0.1/8,192.168.0.0/16"
 
-  # 调试模式
-  netbouncer --debug`
+  # 使用MySQL数据库
+  netbouncer --db-driver mysql --db-host localhost --db-name netbouncer`
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
