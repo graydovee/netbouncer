@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整的git历史
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -51,9 +53,34 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          # 获取当前tag名称
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          
+          # 获取上一个tag（如果存在）
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          
+          # 生成release notes
+          if [ -n "$PREVIOUS_TAG" ]; then
+            # 如果有上一个tag，获取从上一个tag到当前tag的commit
+            COMMITS=$(git log --pretty=format:"- %s (%h) - %an" $PREVIOUS_TAG..$TAG_NAME)
+            RELEASE_NOTES="## 版本 $TAG_NAME 更新内容\n\n### 提交记录\n\n$COMMITS"
+          else
+            # 如果是第一个tag，获取所有commit
+            COMMITS=$(git log --pretty=format:"- %s (%h) - %an" --reverse)
+            RELEASE_NOTES="## 版本 $TAG_NAME 更新内容\n\n### 提交记录\n\n$COMMITS"
+          fi
+          
+          # 设置输出变量
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          generate_release_notes: true
+          body: ${{ steps.release_notes.outputs.notes }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
