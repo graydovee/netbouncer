@@ -29,7 +29,7 @@ const drawerWidth = 240;
 
 const menuItems = [
   { text: '网络流量监控', icon: <MonitorIcon />, path: '/' },
-  { text: '禁用IP管理', icon: <BlockIcon />, path: '/banned' },
+  { text: 'IP管理', icon: <BlockIcon />, path: '/ip-management' },
   { text: '组管理', icon: <GroupIcon />, path: '/groups' },
 ];
 

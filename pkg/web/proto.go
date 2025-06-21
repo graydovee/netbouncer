@@ -35,19 +35,32 @@ func Error(code int, msg string) Response {
 	}
 }
 
-type IPRequest struct {
+type CreateIPNetRequest struct {
 	IpNet   string `json:"ip_net"`
 	GroupId uint   `json:"group_id"`
+	Action  string `json:"action"`
 }
 
-// BatchIPRequest 批量IP/网段操作请求
-type BatchIPRequest struct {
+// BatchCreateIPNetRequest 批量IP/网段操作请求
+type BatchCreateIPNetRequest struct {
 	IpNets  []string `json:"ip_nets"`
 	GroupId uint     `json:"group_id"`
+	Action  string   `json:"action"`
 }
 
-// GroupRequest 组管理请求
-type GroupRequest struct {
+// UpdateIPNetGroupRequest 修改IP所属组请求
+type UpdateIPNetGroupRequest struct {
+	ID      uint `json:"id"`
+	GroupId uint `json:"group_id"`
+}
+
+type UpdateIPNetActionRequest struct {
+	ID     uint   `json:"id"`
+	Action string `json:"action"`
+}
+
+// CreateGroupRequest 组管理请求
+type CreateGroupRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }

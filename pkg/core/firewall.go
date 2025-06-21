@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/graydovee/netbouncer/pkg/config"
+	"github.com/graydovee/netbouncer/pkg/store"
 )
 
 // NewFirewallFromConfig 根据配置创建相应的防火墙实例
@@ -83,7 +84,7 @@ func (f *Firewall) setupSignalHandler() {
 	os.Exit(0)
 }
 
-func (f *Firewall) Init(ipList []string) error {
+func (f *Firewall) Init(ipList []store.IpNet) error {
 	// 初始化防火墙规则
 	err := f.core.InitRules()
 	if err != nil {
@@ -91,12 +92,15 @@ func (f *Firewall) Init(ipList []string) error {
 	}
 
 	// 从传入的IP列表中加载所有IP到防火墙规则
-	for _, ip := range ipList {
-		err = f.core.AddToRules(ip)
-		if err != nil {
-			_ = f.core.CleanupRules()
-			return fmt.Errorf("初始化IP规则失败 %s: %w", ip, err)
+	for _, ipnet := range ipList {
+		if ipnet.Action == store.ActionBan {
+			err = f.core.AddToRules(ipnet.IpNet)
+			if err != nil {
+				_ = f.core.CleanupRules()
+				return fmt.Errorf("初始化IP规则失败 %s, action: %s: %w", ipnet.IpNet, ipnet.Action, err)
+			}
 		}
+
 	}
 
 	return nil

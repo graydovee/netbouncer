@@ -15,14 +15,16 @@ type TrafficData struct {
 	IsBanned        bool    `json:"is_banned"`         // 是否被ban
 }
 
-type BannedIpNet struct {
-	IpNet     string         `json:"ip_net"`
-	CreatedAt string         `json:"created_at"`
-	UpdatedAt string         `json:"updated_at"`
-	Group     *BannedIpGroup `json:"group"`
+type IpNet struct {
+	ID        uint     `json:"id"`
+	IpNet     string   `json:"ip_net"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
+	Group     *IpGroup `json:"group"`
+	Action    string   `json:"action"`
 }
 
-type BannedIpGroup struct {
+type IpGroup struct {
 	ID          uint   `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`

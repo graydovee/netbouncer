@@ -123,10 +123,10 @@ func run() error {
 	}
 	defer mon.Stop()
 
-	// 首先创建IP存储
-	ipStore, err := store.NewIpStore(&cfg.Database)
+	// 创建数据库连接
+	store, err := store.NewStore(&cfg.Database)
 	if err != nil {
-		return fmt.Errorf("创建IP存储器失败: %w", err)
+		return fmt.Errorf("创建数据库连接失败: %w", err)
 	}
 
 	// 创建防火墙
@@ -135,7 +135,7 @@ func run() error {
 		return fmt.Errorf("创建防火墙失败: %w", err)
 	}
 
-	svc := service.NewNetService(mon, fw, ipStore)
+	svc := service.NewNetService(mon, fw, store)
 	if err := svc.Init(); err != nil {
 		return fmt.Errorf("初始化失败: %w", err)
 	}

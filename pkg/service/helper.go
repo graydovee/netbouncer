@@ -24,7 +24,7 @@ func parseIpNet(ipNet string) *net.IPNet {
 	return nil
 }
 
-func convertToIpNet(ipNet ...store.BannedIpNet) []*net.IPNet {
+func convertToIpNet(ipNet ...store.IpNet) []*net.IPNet {
 	ipNets := make([]*net.IPNet, 0, len(ipNet))
 	for _, ip := range ipNet {
 		ipnet := parseIpNet(ip.IpNet)
@@ -35,8 +35,8 @@ func convertToIpNet(ipNet ...store.BannedIpNet) []*net.IPNet {
 	return ipNets
 }
 
-func convertToIpNetGroup(storeGroup *store.BannedIpNetGroup) BannedIpGroup {
-	return BannedIpGroup{
+func convertToIpNetGroup(storeGroup *store.IpNetGroup) IpGroup {
+	return IpGroup{
 		ID:          storeGroup.ID,
 		Name:        storeGroup.Name,
 		Description: storeGroup.Description,

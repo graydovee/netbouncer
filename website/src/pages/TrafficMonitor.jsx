@@ -129,10 +129,14 @@ function TrafficMonitor() {
   // 禁用IP
   const banIP = async (ip) => {
     try {
-      const response = await fetch('/api/ban', {
+      const response = await fetch('/api/ip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip_net: ip })
+        body: JSON.stringify({ 
+          ip_net: ip,
+          group_id: 0, // 使用默认组
+          action: 'ban' // 明确指定行为为ban
+        })
       });
       const result = await response.json();
       if (result.code === 200) {

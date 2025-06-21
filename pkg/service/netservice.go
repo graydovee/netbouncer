@@ -2,6 +2,8 @@ package service
 
 import (
 	"fmt"
+	"log/slog"
+	"net"
 	"time"
 
 	"github.com/graydovee/netbouncer/pkg/core"
@@ -11,14 +13,15 @@ import (
 type NetService struct {
 	monitor  *core.Monitor
 	firewall *core.Firewall
-	ipStore  *store.IpStore
+
+	store *store.Store
 }
 
-func NewNetService(monitor *core.Monitor, firewall *core.Firewall, ipStore *store.IpStore) *NetService {
+func NewNetService(monitor *core.Monitor, firewall *core.Firewall, store *store.Store) *NetService {
 	svc := &NetService{
 		monitor:  monitor,
 		firewall: firewall,
-		ipStore:  ipStore,
+		store:    store,
 	}
 
 	return svc
@@ -27,34 +30,28 @@ func NewNetService(monitor *core.Monitor, firewall *core.Firewall, ipStore *stor
 // Init 初始化服务
 func (s *NetService) Init() error {
 	// 确保存在默认组
-	_, err := s.ipStore.GetDefaultGroup()
+	_, err := s.store.IpNetGroupStore.FindDefault()
 	if err != nil {
 		// 如果没有默认组，创建一个
-		defaultGroup, err := s.ipStore.CreateGroup("默认组", "系统默认的IP禁用组")
+		defaultGroup, err := s.store.IpNetGroupStore.Create("默认组", "系统默认的IP禁用组")
 		if err != nil {
 			return fmt.Errorf("创建默认组失败: %w", err)
 		}
 		// 设置为默认组
-		err = s.ipStore.SetDefaultGroup(defaultGroup.ID)
+		err = s.store.IpNetGroupStore.SetDefault(defaultGroup.ID)
 		if err != nil {
 			return fmt.Errorf("设置默认组失败: %w", err)
 		}
 	}
 
 	// 从存储中加载所有已存在的IP
-	ips, err := s.ipStore.GetBlacklist()
+	ips, err := s.store.IpNetStore.FindAll()
 	if err != nil {
 		return err
 	}
 
-	// 提取IP地址列表
-	ipList := make([]string, len(ips))
-	for i, ip := range ips {
-		ipList[i] = ip.IpNet
-	}
-
 	// 初始化防火墙
-	err = s.firewall.Init(ipList)
+	err = s.firewall.Init(ips)
 	if err != nil {
 		return err
 	}
@@ -65,17 +62,22 @@ func (s *NetService) Init() error {
 // GetAllStats 获取所有IP的流量统计
 func (s *NetService) GetAllStats() ([]TrafficData, error) {
 	stats := s.monitor.GetAllStats()
-	banedIpNets, err := s.ipStore.GetBlacklist()
+	trafficData := make([]TrafficData, 0, len(stats))
+
+	ipNets, err := s.store.IpNetStore.FindByAction(store.ActionBan)
 	if err != nil {
 		return nil, err
 	}
 
-	trafficData := make([]TrafficData, 0, len(stats))
-
-	ipNets := convertToIpNet(banedIpNets...)
+	banedIpNets := make([]*net.IPNet, 0)
+	for _, ip := range ipNets {
+		if ip.Action == store.ActionBan {
+			banedIpNets = append(banedIpNets, convertToIpNet(ip)...)
+		}
+	}
 
 	for _, stat := range stats {
-		isBanned := isContainIpNet(ipNets, stat.RemoteIP)
+		isBanned := isContainIpNet(banedIpNets, stat.RemoteIP)
 
 		trafficData = append(trafficData, TrafficData{
 			RemoteIP:        stat.RemoteIP,
@@ -100,15 +102,20 @@ func (s *NetService) GetStats() ([]TrafficData, error) {
 	stats := s.monitor.GetStats()
 	trafficData := make([]TrafficData, 0, len(stats))
 
-	banedIpNets, err := s.ipStore.GetBlacklist()
+	ipNets, err := s.store.IpNetStore.FindByAction(store.ActionBan)
 	if err != nil {
 		return nil, err
 	}
 
-	ipNets := convertToIpNet(banedIpNets...)
+	banedIpNets := make([]*net.IPNet, 0)
+	for _, ip := range ipNets {
+		if ip.Action == store.ActionBan {
+			banedIpNets = append(banedIpNets, convertToIpNet(ip)...)
+		}
+	}
 
 	for _, stat := range stats {
-		isBanned := isContainIpNet(ipNets, stat.RemoteIP)
+		isBanned := isContainIpNet(banedIpNets, stat.RemoteIP)
 
 		trafficData = append(trafficData, TrafficData{
 			RemoteIP:        stat.RemoteIP,
@@ -128,24 +135,19 @@ func (s *NetService) GetStats() ([]TrafficData, error) {
 	return trafficData, nil
 }
 
-// BanIpNet 封禁IP，同时更新防火墙规则和存储
-func (s *NetService) BanIpNet(ipNet string, groupId uint) error {
-	// 检查IP是否已经在黑名单中
-	if s.IsInBlacklist(ipNet) {
-		return nil
-	}
+func (s *NetService) CreateIpNet(ipnet string, groupId uint, action string) error {
 
 	// 如果没有指定组ID，使用默认组
 	if groupId == 0 {
-		defaultGroup, err := s.ipStore.GetDefaultGroup()
+		defaultGroup, err := s.store.IpNetGroupStore.FindDefault()
 		if err != nil {
 			// 如果没有默认组，创建一个
-			defaultGroup, err = s.ipStore.CreateGroup("默认组", "系统默认的IP禁用组")
+			defaultGroup, err = s.store.IpNetGroupStore.Create("默认组", "系统默认的IP禁用组")
 			if err != nil {
 				return fmt.Errorf("创建默认组失败: %w", err)
 			}
 			// 设置为默认组
-			err = s.ipStore.SetDefaultGroup(defaultGroup.ID)
+			err = s.store.IpNetGroupStore.SetDefault(defaultGroup.ID)
 			if err != nil {
 				return fmt.Errorf("设置默认组失败: %w", err)
 			}
@@ -153,170 +155,233 @@ func (s *NetService) BanIpNet(ipNet string, groupId uint) error {
 		groupId = defaultGroup.ID
 	} else {
 		// 检查指定的组是否存在
-		group, err := s.ipStore.GetGroup(groupId)
+		group, err := s.store.IpNetGroupStore.FindByID(groupId)
 		if err != nil || group == nil {
 			return fmt.Errorf("指定的组不存在: %w", err)
 		}
 	}
 
-	// 添加到防火墙规则
-	err := s.firewall.Ban(ipNet)
-	if err != nil {
-		return err
-	}
-
-	// 添加到存储
-	err = s.ipStore.AddIpBlacklist(ipNet, groupId)
-	if err != nil {
-		// 如果存储失败，需要从防火墙规则中删除
-		_ = s.firewall.Unban(ipNet)
-		return err
-	}
-
-	return nil
-}
-
-// BanIpNets 批量ban多个IP地址或网段
-func (s *NetService) BanIpNets(ipNets []string, groupId uint) error {
-	for _, ipNet := range ipNets {
-		if err := s.BanIpNet(ipNet, groupId); err != nil {
+	if s.store.IpNetStore.ExistsByIpNet(ipnet) {
+		// 如果IP网络已存在，则更新action
+		ipNet, err := s.store.IpNetStore.FindByIpNet(ipnet)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
-}
 
-// UnbanIpNet 解封IP，同时从防火墙规则和存储中删除
-func (s *NetService) UnbanIpNet(ipNet string) error {
-	// 检查IP是否在黑名单中
-	if !s.IsInBlacklist(ipNet) {
+		err = s.UpdateIpNetAction(ipNet.ID, action)
+		if err != nil {
+			return err
+		}
+
 		return nil
 	}
 
-	// 从防火墙规则中删除
-	err := s.firewall.Unban(ipNet)
+	// 创建IP网络记录
+	ipNet, err := s.store.IpNetStore.Create(ipnet, groupId, action)
 	if err != nil {
 		return err
 	}
 
-	// 从存储中删除
-	err = s.ipStore.RemoveIpBlacklist(ipNet)
+	err = s.applyAction(ipNet)
 	if err != nil {
-		// 如果存储删除失败，需要重新添加到防火墙规则
-		_ = s.firewall.Ban(ipNet)
 		return err
 	}
 
 	return nil
 }
 
-// IsInBlacklist 检查IP是否被封禁
-func (s *NetService) IsInBlacklist(ip string) bool {
-	return s.ipStore.IsInBlacklist(ip)
+func (s *NetService) DeleteIpNet(id uint) error {
+	ipNet, err := s.store.IpNetStore.FindByID(id)
+	if err != nil {
+		return err
+	}
+
+	err = s.revertAction(ipNet)
+	if err != nil {
+		return fmt.Errorf("撤销原有行为失败: %w", err)
+	}
+
+	err = s.store.IpNetStore.DeleteByID(id)
+	if err != nil {
+		return fmt.Errorf("删除IP网络失败: %w", err)
+	}
+
+	return nil
 }
 
-// GetBannedIPs 获取所有被封禁的IP列表
-func (s *NetService) GetBannedIPs() ([]BannedIpNet, error) {
-	groups, err := s.ipStore.GetAllGroups()
+func (s *NetService) UpdateIpNetAction(id uint, action string) error {
+	ipNet, err := s.store.IpNetStore.FindByID(id)
+	if err != nil {
+		return err
+	}
+
+	err = s.revertAction(ipNet)
+	if err != nil {
+		return fmt.Errorf("撤销原有行为失败: %w", err)
+	}
+
+	ipNet.Action = action
+
+	err = s.applyAction(ipNet)
+	if err != nil {
+		return fmt.Errorf("应用新行为失败: %w", err)
+	}
+
+	err = s.store.IpNetStore.UpdateAction(id, action)
+	if err != nil {
+		return fmt.Errorf("更新IP行为失败: %w", err)
+	}
+
+	return nil
+}
+
+func (s *NetService) applyAction(ipNet *store.IpNet) error {
+	switch ipNet.Action {
+	case store.ActionBan:
+		slog.Info("applyAction", "ipNet", ipNet)
+		return s.firewall.Ban(ipNet.IpNet)
+	case store.ActionAllow:
+		return nil
+	default:
+		return fmt.Errorf("不支持的操作: %s", ipNet.Action)
+	}
+}
+
+func (s *NetService) revertAction(ipNet *store.IpNet) error {
+	switch ipNet.Action {
+	case store.ActionBan:
+		slog.Info("revertAction", "ipNet", ipNet)
+		return s.firewall.Unban(ipNet.IpNet)
+	case store.ActionAllow:
+		return nil
+	default:
+		return fmt.Errorf("不支持的操作: %s", ipNet.Action)
+	}
+}
+
+// ListAllIpNets 获取所有IP列表
+func (s *NetService) ListAllIpNets() ([]IpNet, error) {
+	groups, err := s.store.IpNetGroupStore.FindAll()
 	if err != nil {
 		return nil, err
 	}
 
-	groupMap := make(map[uint]*BannedIpGroup)
+	groupMap := make(map[uint]*IpGroup)
 	for _, group := range groups {
 		g := convertToIpNetGroup(&group)
 		groupMap[group.ID] = &g
 	}
 
-	ips, err := s.ipStore.GetBlacklist()
+	ips, err := s.store.IpNetStore.FindAll()
 	if err != nil {
 		return nil, err
 	}
 
-	ipNets := make([]BannedIpNet, 0, len(ips))
+	ipNets := make([]IpNet, 0, len(ips))
 	for _, ip := range ips {
-		ipNets = append(ipNets, BannedIpNet{
+		ipNets = append(ipNets, IpNet{
+			ID:        ip.ID,
 			IpNet:     ip.IpNet,
 			CreatedAt: ip.CreatedAt.Format(time.RFC3339),
 			UpdatedAt: ip.UpdatedAt.Format(time.RFC3339),
 			Group:     groupMap[ip.GroupID],
+			Action:    ip.Action,
 		})
 	}
 	return ipNets, nil
 }
 
-func (s *NetService) GetBannedIPsByGroup(groupId uint) ([]BannedIpNet, error) {
-	group, err := s.ipStore.GetGroup(groupId)
+func (s *NetService) ListIpNetsByGroup(groupId uint) ([]IpNet, error) {
+	group, err := s.store.IpNetGroupStore.FindByID(groupId)
 	if err != nil {
 		return nil, err
 	}
 
-	ips, err := s.ipStore.GetBlacklistByGroup(groupId)
+	ips, err := s.store.IpNetStore.FindByGroupID(groupId)
 	if err != nil {
 		return nil, err
 	}
 
 	g := convertToIpNetGroup(group)
 
-	ipNets := make([]BannedIpNet, 0, len(ips))
+	ipNets := make([]IpNet, 0, len(ips))
 	for _, ip := range ips {
-		ipNets = append(ipNets, BannedIpNet{
+		ipNets = append(ipNets, IpNet{
+			ID:        ip.ID,
 			IpNet:     ip.IpNet,
 			CreatedAt: ip.CreatedAt.Format(time.RFC3339),
 			UpdatedAt: ip.UpdatedAt.Format(time.RFC3339),
 			Group:     &g,
+			Action:    ip.Action,
 		})
 	}
 	return ipNets, nil
 }
 
-func (s *NetService) GetGroups() ([]BannedIpGroup, error) {
-	groups, err := s.ipStore.GetAllGroups()
+func (s *NetService) ListAllGroups() ([]IpGroup, error) {
+	groups, err := s.store.IpNetGroupStore.FindAll()
 	if err != nil {
 		return nil, err
 	}
 
-	groupList := make([]BannedIpGroup, 0, len(groups))
+	groupList := make([]IpGroup, 0, len(groups))
 	for _, group := range groups {
 		groupList = append(groupList, convertToIpNetGroup(&group))
 	}
 	return groupList, nil
 }
 
-func (s *NetService) CreateGroup(name string, description string) (BannedIpGroup, error) {
-	group, err := s.ipStore.CreateGroup(name, description)
+func (s *NetService) CreateGroup(name string, description string) (IpGroup, error) {
+	group, err := s.store.IpNetGroupStore.Create(name, description)
 	if err != nil {
-		return BannedIpGroup{}, err
+		return IpGroup{}, err
 	}
 	return convertToIpNetGroup(group), nil
 }
 
-func (s *NetService) UpdateGroup(id uint, name string, description string) (BannedIpGroup, error) {
-	group, err := s.ipStore.UpdateGroup(id, name, description)
+func (s *NetService) UpdateGroup(id uint, name string, description string) (IpGroup, error) {
+	group, err := s.store.IpNetGroupStore.Update(id, name, description)
 	if err != nil {
-		return BannedIpGroup{}, err
+		return IpGroup{}, err
 	}
 	return convertToIpNetGroup(group), nil
 }
 
 func (s *NetService) DeleteGroup(id uint) error {
 	//删除组后，所属组的ip会自动归到default group
-	defaultGroup, err := s.ipStore.GetDefaultGroup()
+	defaultGroup, err := s.store.IpNetGroupStore.FindDefault()
 	if err != nil {
 		return err
 	}
 
-	ips, err := s.ipStore.GetBlacklistByGroup(id)
+	ips, err := s.store.IpNetStore.FindByGroupID(id)
 	if err != nil {
 		return err
 	}
 
 	for _, ip := range ips {
-		err = s.ipStore.UpdateIpGroup(ip.IpNet, defaultGroup.ID)
+		err = s.store.IpNetStore.UpdateGroupID(ip.ID, defaultGroup.ID)
 		if err != nil {
 			return err
 		}
 	}
 
-	return s.ipStore.DeleteGroup(id)
+	return s.store.IpNetGroupStore.DeleteByID(id)
+}
+
+// UpdateIPGroup 修改IP所属组
+func (s *NetService) UpdateIPGroup(id uint, groupId uint) error {
+	// 检查指定的组是否存在
+	group, err := s.store.IpNetGroupStore.FindByID(groupId)
+	if err != nil || group == nil {
+		return fmt.Errorf("指定的组不存在: %w", err)
+	}
+
+	// 更新IP所属组
+	err = s.store.IpNetStore.UpdateGroupID(id, groupId)
+	if err != nil {
+		return fmt.Errorf("更新IP所属组失败: %w", err)
+	}
+
+	return nil
 }

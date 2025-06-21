@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"slices"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
@@ -131,7 +132,16 @@ func (i *IpSetFirewallCore) AddToRules(ipOrCidr string) error {
 	}
 
 	slog.Info("添加到ipset", "ip", ipOrCidr, "cidr", cidr, "cmd", "ipset add "+i.ipset+" "+ipOrCidr)
-	return netlink.IpsetAdd(i.ipset, entry)
+	err = netlink.IpsetAdd(i.ipset, entry)
+	// 如果ipset中已存在，则返回成功
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("添加到ipset失败: %w", err)
+	}
+
+	return nil
 }
 
 func (i *IpSetFirewallCore) RemoveFromRules(ipOrCidr string) error {

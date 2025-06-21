@@ -3,7 +3,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Layout from './components/Layout';
 import TrafficMonitor from './pages/TrafficMonitor';
-import BannedIPs from './pages/BannedIPs';
+import IPManagement from './pages/IPManagement';
 import GroupManagement from './pages/GroupManagement';
 import NotFound from './pages/NotFound';
 
@@ -36,7 +36,7 @@ function App() {
         <Layout>
           <Routes>
             <Route path="/" element={<TrafficMonitor />} />
-            <Route path="/banned" element={<BannedIPs />} />
+            <Route path="/ip-management" element={<IPManagement />} />
             <Route path="/groups" element={<GroupManagement />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

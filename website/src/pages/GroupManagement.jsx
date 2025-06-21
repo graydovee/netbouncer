@@ -75,7 +75,7 @@ function GroupManagement() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/groups');
+      const response = await fetch('/api/group');
       const result = await response.json();
       if (result.code === 200) {
         setGroups(result.data || []);
