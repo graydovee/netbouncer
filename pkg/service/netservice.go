@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"log/slog"
 	"net"
 	"time"
 
@@ -182,7 +181,7 @@ func (s *NetService) CreateIpNet(ipnet string, groupId uint, action string) erro
 		return err
 	}
 
-	err = s.applyAction(ipNet)
+	err = s.firewall.SetAction(ipNet.IpNet, action)
 	if err != nil {
 		return err
 	}
@@ -196,7 +195,7 @@ func (s *NetService) DeleteIpNet(id uint) error {
 		return err
 	}
 
-	err = s.revertAction(ipNet)
+	err = s.firewall.CleanupIpNet(ipNet.IpNet)
 	if err != nil {
 		return fmt.Errorf("撤销原有行为失败: %w", err)
 	}
@@ -215,14 +214,11 @@ func (s *NetService) UpdateIpNetAction(id uint, action string) error {
 		return err
 	}
 
-	err = s.revertAction(ipNet)
-	if err != nil {
-		return fmt.Errorf("撤销原有行为失败: %w", err)
+	if action == ipNet.Action {
+		return nil
 	}
 
-	ipNet.Action = action
-
-	err = s.applyAction(ipNet)
+	err = s.firewall.SetAction(ipNet.IpNet, action)
 	if err != nil {
 		return fmt.Errorf("应用新行为失败: %w", err)
 	}
@@ -233,30 +229,6 @@ func (s *NetService) UpdateIpNetAction(id uint, action string) error {
 	}
 
 	return nil
-}
-
-func (s *NetService) applyAction(ipNet *store.IpNet) error {
-	switch ipNet.Action {
-	case store.ActionBan:
-		slog.Info("applyAction", "ipNet", ipNet)
-		return s.firewall.Ban(ipNet.IpNet)
-	case store.ActionAllow:
-		return nil
-	default:
-		return fmt.Errorf("不支持的操作: %s", ipNet.Action)
-	}
-}
-
-func (s *NetService) revertAction(ipNet *store.IpNet) error {
-	switch ipNet.Action {
-	case store.ActionBan:
-		slog.Info("revertAction", "ipNet", ipNet)
-		return s.firewall.Unban(ipNet.IpNet)
-	case store.ActionAllow:
-		return nil
-	default:
-		return fmt.Errorf("不支持的操作: %s", ipNet.Action)
-	}
 }
 
 // ListAllIpNets 获取所有IP列表

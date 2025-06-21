@@ -41,13 +41,6 @@ type CreateIPNetRequest struct {
 	Action  string `json:"action"`
 }
 
-// BatchCreateIPNetRequest 批量IP/网段操作请求
-type BatchCreateIPNetRequest struct {
-	IpNets  []string `json:"ip_nets"`
-	GroupId uint     `json:"group_id"`
-	Action  string   `json:"action"`
-}
-
 // UpdateIPNetGroupRequest 修改IP所属组请求
 type UpdateIPNetGroupRequest struct {
 	ID      uint `json:"id"`

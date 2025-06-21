@@ -8,3 +8,5 @@ bin/
 web/
 
 vendor/
+
+__debug_bin*

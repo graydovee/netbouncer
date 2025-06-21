@@ -1,8 +1,10 @@
 package core
 
 import (
+	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 )
@@ -57,14 +59,52 @@ func (i *IptablesFirewallCore) InitRules() error {
 	return nil
 }
 
-func (i *IptablesFirewallCore) AddToRules(ipNet string) error {
-	slog.Info("添加到iptables规则", "ip", ipNet, "cmd", "iptables -A "+i.chain+" -s "+ipNet+" -j DROP")
-	return i.ipt.AppendUnique("filter", i.chain, "-s", ipNet, "-j", "DROP")
+func (i *IptablesFirewallCore) SetAction(ipNet string, action string) error {
+	switch action {
+	case "ban":
+		return i.addToRules(ipNet)
+	case "allow":
+		return i.removeFromRules(ipNet)
+	default:
+		return fmt.Errorf("不支持的防火墙动作: %s", action)
+	}
 }
 
-func (i *IptablesFirewallCore) RemoveFromRules(ipNet string) error {
+func (i *IptablesFirewallCore) CleanupIpNetRules(ipNet string) error {
+	err := i.removeFromRules(ipNet)
+	if err != nil {
+		// 如果IP不存在，则返回成功
+		if strings.Contains(err.Error(), "not found") {
+			return nil
+		}
+		return fmt.Errorf("清理IP规则失败: %w", err)
+	}
+	return nil
+}
+
+func (i *IptablesFirewallCore) addToRules(ipNet string) error {
+	slog.Info("添加到iptables规则", "ip", ipNet, "cmd", "iptables -A "+i.chain+" -s "+ipNet+" -j DROP")
+	err := i.ipt.AppendUnique("filter", i.chain, "-s", ipNet, "-j", "DROP")
+	// AppendUnique 已经保证了幂等性，如果规则已存在则不会重复添加
+	if err != nil {
+		return fmt.Errorf("添加到iptables规则失败: %w", err)
+	}
+	return nil
+}
+
+func (i *IptablesFirewallCore) removeFromRules(ipNet string) error {
 	slog.Info("从iptables规则中删除", "ip", ipNet, "cmd", "iptables -D "+i.chain+" -s "+ipNet+" -j DROP")
-	return i.ipt.Delete("filter", i.chain, "-s", ipNet, "-j", "DROP")
+	err := i.ipt.Delete("filter", i.chain, "-s", ipNet, "-j", "DROP")
+	// 如果规则不存在，则返回成功（幂等操作）
+	errStr := err.Error()
+	if err != nil && strings.Contains(errStr, "Bad rule") {
+		slog.Info("iptables规则不存在", "ip", ipNet)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("从iptables规则中删除失败: %w", err)
+	}
+	return nil
 }
 
 func (i *IptablesFirewallCore) CleanupRules() error {

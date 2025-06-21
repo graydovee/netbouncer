@@ -105,7 +105,30 @@ func (i *IpSetFirewallCore) setupIptables() error {
 	return nil
 }
 
-func (i *IpSetFirewallCore) AddToRules(ipOrCidr string) error {
+func (i *IpSetFirewallCore) SetAction(ipOrCidr string, action string) error {
+	switch action {
+	case "ban":
+		return i.addToRules(ipOrCidr)
+	case "allow":
+		return i.removeFromRules(ipOrCidr)
+	default:
+		return fmt.Errorf("不支持的防火墙动作: %s", action)
+	}
+}
+
+func (i *IpSetFirewallCore) CleanupIpNetRules(ipOrCidr string) error {
+	err := i.removeFromRules(ipOrCidr)
+	if err != nil {
+		// 如果IP不存在，则返回成功
+		if strings.Contains(err.Error(), "not found") {
+			return nil
+		}
+		return fmt.Errorf("清理IP规则失败: %w", err)
+	}
+	return nil
+}
+
+func (i *IpSetFirewallCore) addToRules(ipOrCidr string) error {
 	// 解析IP或CIDR
 	_, ipNet, err := net.ParseCIDR(ipOrCidr)
 	if err != nil {
@@ -144,7 +167,7 @@ func (i *IpSetFirewallCore) AddToRules(ipOrCidr string) error {
 	return nil
 }
 
-func (i *IpSetFirewallCore) RemoveFromRules(ipOrCidr string) error {
+func (i *IpSetFirewallCore) removeFromRules(ipOrCidr string) error {
 	// 解析IP或CIDR
 	_, ipNet, err := net.ParseCIDR(ipOrCidr)
 	if err != nil {
@@ -171,7 +194,19 @@ func (i *IpSetFirewallCore) RemoveFromRules(ipOrCidr string) error {
 	}
 
 	slog.Info("从ipset中删除", "ip", ipOrCidr, "cidr", cidr, "cmd", "ipset del "+i.ipset+" "+ipOrCidr)
-	return netlink.IpsetDel(i.ipset, entry)
+	err = netlink.IpsetDel(i.ipset, entry)
+	// 如果ipset中不存在，则返回成功（幂等操作）
+	if err != nil {
+		errStr := err.Error()
+		// 检查各种可能的"不存在"错误
+		if strings.Contains(errStr, "exis") { // 处理截断的错误信息
+			slog.Info("IP不存在于ipset中", "ip", ipOrCidr, "error", errStr)
+			return nil
+		}
+		return fmt.Errorf("从ipset中删除失败: %w", err)
+	}
+
+	return nil
 }
 
 func (i *IpSetFirewallCore) CleanupRules() error {

@@ -37,7 +37,6 @@ func NewServer(netService *service.NetService) *Server {
 	e.GET("/api/ip", svr.handleListAllIpNets)
 	e.GET("/api/ip/:groupId", svr.handleListIpNetsByGroup)
 	e.POST("/api/ip", svr.handleCreateIpNet)
-	e.POST("/api/ip/batch", svr.handleBatchCreateIpNet)
 	e.DELETE("/api/ip/:id", svr.handleDeleteIpNet)
 	e.GET("/api/ip/action", svr.handleListAllActions)
 	e.PUT("/api/ip/action", svr.handleUpdateIpNetAction)
@@ -91,27 +90,6 @@ func (s *Server) handleCreateIpNet(c echo.Context) error {
 		return c.JSON(http.StatusOK, Error(500, err.Error()))
 	}
 	return c.JSON(http.StatusOK, Success("已禁用"))
-}
-
-func (s *Server) handleBatchCreateIpNet(c echo.Context) error {
-	var r BatchCreateIPNetRequest
-	if err := c.Bind(&r); err != nil {
-		return c.JSON(http.StatusOK, Error(400, "参数错误"))
-	}
-
-	for _, ipNet := range r.IpNets {
-		if err := validateIpNet(ipNet); err != nil {
-			return c.JSON(http.StatusOK, Error(400, "无效的IP地址或CIDR格式: "+ipNet))
-		}
-	}
-
-	for _, ipNet := range r.IpNets {
-		err := s.netService.CreateIpNet(ipNet, r.GroupId, r.Action)
-		if err != nil {
-			return c.JSON(http.StatusOK, Error(500, err.Error()))
-		}
-	}
-	return c.JSON(http.StatusOK, Success("批量禁用成功"))
 }
 
 func (s *Server) handleListAllActions(c echo.Context) error {

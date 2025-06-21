@@ -46,10 +46,10 @@ func NewFirewallFromConfig(cfg *config.FirewallConfig) (*Firewall, error) {
 type FirewallCore interface {
 	// 初始化防火墙规则
 	InitRules() error
-	// 添加IP到防火墙规则
-	AddToRules(ipNet string) error
-	// 从防火墙规则中删除IP
-	RemoveFromRules(ipNet string) error
+	// 设置IP的防火墙动作
+	SetAction(ipNet string, action string) error
+	// 清理Ip的防火墙规则
+	CleanupIpNetRules(ipNet string) error
 	// 清理防火墙规则
 	CleanupRules() error
 }
@@ -93,37 +93,28 @@ func (f *Firewall) Init(ipList []store.IpNet) error {
 
 	// 从传入的IP列表中加载所有IP到防火墙规则
 	for _, ipnet := range ipList {
-		if ipnet.Action == store.ActionBan {
-			err = f.core.AddToRules(ipnet.IpNet)
-			if err != nil {
-				_ = f.core.CleanupRules()
-				return fmt.Errorf("初始化IP规则失败 %s, action: %s: %w", ipnet.IpNet, ipnet.Action, err)
-			}
+		err = f.core.SetAction(ipnet.IpNet, ipnet.Action)
+		if err != nil {
+			_ = f.core.CleanupRules()
+			return fmt.Errorf("初始化IP规则失败 %s, action: %s: %w", ipnet.IpNet, ipnet.Action, err)
 		}
-
 	}
 
 	return nil
 }
 
-func (f *Firewall) Ban(ipNet string) error {
-	// 添加到防火墙规则
-	err := f.core.AddToRules(ipNet)
+func (f *Firewall) SetAction(ipNet string, action string) error {
+	// 设置IP的防火墙动作
+	err := f.core.SetAction(ipNet, action)
 	if err != nil {
-		return fmt.Errorf("添加IP到防火墙规则失败: %w", err)
+		return fmt.Errorf("设置IP防火墙动作失败: %w", err)
 	}
 
 	return nil
 }
 
-func (f *Firewall) Unban(ipNet string) error {
-	// 从防火墙规则中删除
-	err := f.core.RemoveFromRules(ipNet)
-	if err != nil {
-		return fmt.Errorf("从防火墙规则中删除IP失败: %w", err)
-	}
-
-	return nil
+func (f *Firewall) CleanupIpNet(ipNet string) error {
+	return f.core.CleanupIpNetRules(ipNet)
 }
 
 func (f *Firewall) Cleanup() error {
@@ -138,13 +129,20 @@ func (m *MockFirewallCore) InitRules() error {
 	return nil
 }
 
-func (m *MockFirewallCore) AddToRules(ipNet string) error {
-	slog.Info("添加到Mock防火墙规则", "ip", ipNet)
+func (m *MockFirewallCore) SetAction(ipNet string, action string) error {
+	switch action {
+	case store.ActionBan:
+		slog.Info("设置IP防火墙动作", "ip", ipNet, "action", action)
+	case store.ActionAllow:
+		slog.Info("设置IP防火墙动作", "ip", ipNet, "action", action)
+	default:
+		slog.Warn("未知的防火墙动作", "ip", ipNet, "action", action)
+	}
 	return nil
 }
 
-func (m *MockFirewallCore) RemoveFromRules(ipNet string) error {
-	slog.Info("从Mock防火墙规则中删除", "ip", ipNet)
+func (m *MockFirewallCore) CleanupIpNetRules(ipNet string) error {
+	// Mock防火墙不需要清理IP规则
 	return nil
 }
 
