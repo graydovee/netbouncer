@@ -4,6 +4,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import Layout from './components/Layout';
 import TrafficMonitor from './pages/TrafficMonitor';
 import BannedIPs from './pages/BannedIPs';
+import GroupManagement from './pages/GroupManagement';
 import NotFound from './pages/NotFound';
 
 const theme = createTheme({
@@ -36,6 +37,7 @@ function App() {
           <Routes>
             <Route path="/" element={<TrafficMonitor />} />
             <Route path="/banned" element={<BannedIPs />} />
+            <Route path="/groups" element={<GroupManagement />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Layout>

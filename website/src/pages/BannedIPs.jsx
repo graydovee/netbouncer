@@ -15,11 +15,19 @@ import {
   Tooltip,
   TextField,
   Grid,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Chip,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   Block as BlockIcon,
   Add as AddIcon,
+  FilterList as FilterIcon,
 } from '@mui/icons-material';
 import { useMessageSnackbar, MessageSnackbar } from '../components/MessageSnackbar';
 
@@ -39,13 +47,39 @@ const formatTimestamp = (timestamp) => {
 
 function BannedIPs() {
   const [bannedIPs, setBannedIPs] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [newIP, setNewIP] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
   const [banLoading, setBanLoading] = useState(false);
+  const [selectedTab, setSelectedTab] = useState(0); // 0: 全部, 1+: 按组过滤
   
   // 使用消息提示Hook
   const { snackbar, showMessage, hideMessage } = useMessageSnackbar();
+
+  // 获取组列表
+  const fetchGroups = async () => {
+    setGroupsLoading(true);
+    try {
+      const response = await fetch('/api/groups');
+      const result = await response.json();
+      if (result.code === 200) {
+        setGroups(result.data || []);
+        // 如果有组，设置第一个为默认选择
+        if (result.data && result.data.length > 0 && !selectedGroupId) {
+          setSelectedGroupId(result.data[0].id);
+        }
+      } else {
+        console.error('获取组列表失败:', result.message);
+      }
+    } catch (error) {
+      console.error('获取组列表失败:', error);
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
 
   // 获取禁用IP列表
   const fetchBannedIPs = async () => {
@@ -56,6 +90,27 @@ function BannedIPs() {
       const result = await response.json();
       if (result.code === 200) {
         // 新的响应格式是BannedIpNet数组
+        const bannedIpNets = result.data || [];
+        setBannedIPs(bannedIpNets);
+      } else {
+        setError('获取数据失败: ' + result.message);
+      }
+    } catch (error) {
+      setError('网络请求失败');
+      console.error('获取禁用IP列表失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 根据组ID获取禁用IP列表
+  const fetchBannedIPsByGroup = async (groupId) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/banned/${groupId}`);
+      const result = await response.json();
+      if (result.code === 200) {
         const bannedIpNets = result.data || [];
         setBannedIPs(bannedIpNets);
       } else {
@@ -103,17 +158,29 @@ function BannedIPs() {
       return;
     }
 
+    if (!selectedGroupId) {
+      showMessage('请选择要添加到的组', 'warning');
+      return;
+    }
+
     setBanLoading(true);
     try {
       const response = await fetch('/api/ban', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip_net: newIP.trim() })
+        body: JSON.stringify({ 
+          ip_net: newIP.trim(),
+          group_id: parseInt(selectedGroupId)
+        })
       });
       const result = await response.json();
       if (result.code === 200) {
-        // 禁用成功后重新获取完整的列表，确保包含时间信息
-        await fetchBannedIPs();
+        // 禁用成功后重新获取列表
+        if (selectedTab === 0) {
+          await fetchBannedIPs();
+        } else {
+          await fetchBannedIPsByGroup(selectedGroupId);
+        }
         setNewIP(''); // 清空输入框
         showMessage(`成功禁用 ${newIP.trim()}`);
       } else {
@@ -154,10 +221,29 @@ function BannedIPs() {
     }
   };
 
+  // 处理标签页切换
+  const handleTabChange = (event, newValue) => {
+    setSelectedTab(newValue);
+    if (newValue === 0) {
+      // 显示全部
+      fetchBannedIPs();
+    } else {
+      // 显示指定组
+      const groupId = groups[newValue - 1]?.id;
+      if (groupId) {
+        fetchBannedIPsByGroup(groupId);
+      }
+    }
+  };
+
   // 初始化
   useEffect(() => {
+    fetchGroups();
     fetchBannedIPs();
   }, []);
+
+  // 构建标签页
+  const tabLabels = ['全部', ...groups.map(group => group.name)];
 
   return (
     <Box>
@@ -177,7 +263,7 @@ function BannedIPs() {
           手动禁用IP或CIDR
         </Typography>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={6} md={4}>
+          <Grid item xs={12} sm={4} md={3}>
             <TextField
               fullWidth
               label="IP地址或CIDR"
@@ -189,12 +275,33 @@ function BannedIPs() {
               disabled={banLoading}
             />
           </Grid>
+          <Grid item xs={12} sm={4} md={3}>
+            <FormControl fullWidth size="small" disabled={banLoading || groupsLoading}>
+              <InputLabel>选择组</InputLabel>
+              <Select
+                value={selectedGroupId}
+                label="选择组"
+                onChange={(e) => setSelectedGroupId(e.target.value)}
+              >
+                {groups.map((group) => (
+                  <MenuItem key={group.id} value={group.id}>
+                    {group.name}
+                    {group.description && (
+                      <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                        ({group.description})
+                      </Typography>
+                    )}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
           <Grid item>
             <Button
               variant="contained"
               onClick={banIPOrCIDR}
               startIcon={<AddIcon />}
-              disabled={banLoading || !newIP.trim()}
+              disabled={banLoading || !newIP.trim() || !selectedGroupId}
               color="error"
             >
               {banLoading ? '禁用中...' : '禁用'}
@@ -206,12 +313,51 @@ function BannedIPs() {
         </Typography>
       </Paper>
 
+      {/* 组过滤标签页 */}
+      <Paper sx={{ mb: 2 }}>
+        <Tabs 
+          value={selectedTab} 
+          onChange={handleTabChange}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          {tabLabels.map((label, index) => (
+            <Tab 
+              key={index} 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {label}
+                  {index > 0 && (
+                    <Chip 
+                      label={bannedIPs.filter(ip => ip.group?.id === groups[index - 1]?.id).length}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                    />
+                  )}
+                </Box>
+              }
+            />
+          ))}
+        </Tabs>
+      </Paper>
+
       {/* 操作栏 */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button
             variant="outlined"
-            onClick={fetchBannedIPs}
+            onClick={() => {
+              if (selectedTab === 0) {
+                fetchBannedIPs();
+              } else {
+                const groupId = groups[selectedTab - 1]?.id;
+                if (groupId) {
+                  fetchBannedIPsByGroup(groupId);
+                }
+              }
+            }}
             startIcon={<RefreshIcon />}
             disabled={loading}
           >
@@ -219,6 +365,9 @@ function BannedIPs() {
           </Button>
           <Typography variant="body2" color="text.secondary">
             共 {bannedIPs.length} 个已禁用IP
+            {selectedTab > 0 && groups[selectedTab - 1] && (
+              <span>（组：{groups[selectedTab - 1].name}）</span>
+            )}
           </Typography>
         </Box>
       </Paper>
@@ -230,6 +379,7 @@ function BannedIPs() {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ fontWeight: 'bold' }}>IP地址或CIDR</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>所属组</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>禁用时间</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>更新时间</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>操作</TableCell>
@@ -238,15 +388,15 @@ function BannedIPs() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={4} align="center">
+                  <TableCell colSpan={5} align="center">
                     <CircularProgress size={24} />
                     <Typography sx={{ ml: 1 }}>加载中...</Typography>
                   </TableCell>
                 </TableRow>
               ) : bannedIPs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} align="center">
-                    暂无已禁用IP
+                  <TableCell colSpan={5} align="center">
+                    {selectedTab === 0 ? '暂无已禁用IP' : '该组暂无已禁用IP'}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -254,6 +404,20 @@ function BannedIPs() {
                   <TableRow key={index} hover>
                     <TableCell sx={{ fontFamily: 'monospace', fontSize: '1rem' }}>
                       {bannedIP.ip_net}
+                    </TableCell>
+                    <TableCell>
+                      {bannedIP.group ? (
+                        <Chip 
+                          label={bannedIP.group.name}
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                        />
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          未分组
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell sx={{ color: 'text.secondary', fontSize: '0.875rem' }}>
                       {formatTimestamp(bannedIP.created_at)}

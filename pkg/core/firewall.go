@@ -5,15 +5,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"sort"
 	"syscall"
 
 	"github.com/graydovee/netbouncer/pkg/config"
-	"github.com/graydovee/netbouncer/pkg/store"
 )
 
 // NewFirewallFromConfig 根据配置创建相应的防火墙实例
-func NewFirewallFromConfig(cfg *config.FirewallConfig, ipStore store.IpStore) (*Firewall, error) {
+func NewFirewallFromConfig(cfg *config.FirewallConfig) (*Firewall, error) {
 	var core FirewallCore
 
 	switch config.FirewallType(cfg.Type) {
@@ -40,7 +38,7 @@ func NewFirewallFromConfig(cfg *config.FirewallConfig, ipStore store.IpStore) (*
 		return nil, fmt.Errorf("invalid firewall type: %s", cfg.Type)
 	}
 
-	return NewFirewall(ipStore, core), nil
+	return NewFirewall(core), nil
 }
 
 // FirewallCore 定义防火墙核心操作接口
@@ -48,23 +46,21 @@ type FirewallCore interface {
 	// 初始化防火墙规则
 	InitRules() error
 	// 添加IP到防火墙规则
-	AddToRules(ip string) error
+	AddToRules(ipNet string) error
 	// 从防火墙规则中删除IP
-	RemoveFromRules(ip string) error
+	RemoveFromRules(ipNet string) error
 	// 清理防火墙规则
 	CleanupRules() error
 }
 
 // Firewall 提供统一的防火墙接口，通过组合不同的FirewallCore实现不同功能
 type Firewall struct {
-	ipStore store.IpStore
-	core    FirewallCore
+	core FirewallCore
 }
 
-func NewFirewall(ipStore store.IpStore, core FirewallCore) *Firewall {
+func NewFirewall(core FirewallCore) *Firewall {
 	firewall := &Firewall{
-		ipStore: ipStore,
-		core:    core,
+		core: core,
 	}
 
 	// 注册程序退出信号监听，自动清理防火墙规则
@@ -87,92 +83,43 @@ func (f *Firewall) setupSignalHandler() {
 	os.Exit(0)
 }
 
-func (f *Firewall) Init() error {
+func (f *Firewall) Init(ipList []string) error {
 	// 初始化防火墙规则
 	err := f.core.InitRules()
 	if err != nil {
 		return fmt.Errorf("初始化防火墙规则失败: %w", err)
 	}
 
-	// 从存储中加载所有已存在的IP到防火墙规则
-	ips, err := f.ipStore.GetBlacklist()
-	if err != nil {
-		return fmt.Errorf("获取黑名单失败: %w", err)
-	}
-
-	for _, ip := range ips {
-		err = f.core.AddToRules(ip.IpNet)
+	// 从传入的IP列表中加载所有IP到防火墙规则
+	for _, ip := range ipList {
+		err = f.core.AddToRules(ip)
 		if err != nil {
 			_ = f.core.CleanupRules()
-			return fmt.Errorf("初始化IP规则失败 %s: %w", ip.IpNet, err)
+			return fmt.Errorf("初始化IP规则失败 %s: %w", ip, err)
 		}
 	}
 
 	return nil
 }
 
-func (f *Firewall) Ban(ip string) error {
-	// 检查IP是否已经在黑名单中
-	if f.ipStore.IsInBlacklist(ip) {
-		return nil
-	}
-
+func (f *Firewall) Ban(ipNet string) error {
 	// 添加到防火墙规则
-	err := f.core.AddToRules(ip)
+	err := f.core.AddToRules(ipNet)
 	if err != nil {
 		return fmt.Errorf("添加IP到防火墙规则失败: %w", err)
 	}
 
-	// 添加到存储
-	err = f.ipStore.AddIpBlacklist(ip)
-	if err != nil {
-		// 如果存储失败，需要从防火墙规则中删除
-		_ = f.core.RemoveFromRules(ip)
-		return fmt.Errorf("添加IP到存储失败: %w", err)
-	}
-
 	return nil
 }
 
-func (f *Firewall) Unban(ip string) error {
-	// 检查IP是否在黑名单中
-	if !f.ipStore.IsInBlacklist(ip) {
-		return nil
-	}
-
+func (f *Firewall) Unban(ipNet string) error {
 	// 从防火墙规则中删除
-	err := f.core.RemoveFromRules(ip)
+	err := f.core.RemoveFromRules(ipNet)
 	if err != nil {
 		return fmt.Errorf("从防火墙规则中删除IP失败: %w", err)
 	}
 
-	// 从存储中删除
-	err = f.ipStore.RemoveIpBlacklist(ip)
-	if err != nil {
-		// 如果存储删除失败，需要重新添加到防火墙规则
-		_ = f.core.AddToRules(ip)
-		return fmt.Errorf("从存储中删除IP失败: %w", err)
-	}
-
 	return nil
-}
-
-func (f *Firewall) IsBanned(ip string) bool {
-	return f.ipStore.IsInBlacklist(ip)
-}
-
-func (f *Firewall) GetBannedIPs() ([]string, error) {
-	ips, err := f.ipStore.GetBlacklist()
-	if err != nil {
-		return nil, err
-	}
-
-	ipStrings := make([]string, len(ips))
-	for i, ip := range ips {
-		ipStrings[i] = ip.IpNet
-	}
-	sort.Strings(ipStrings)
-	return ipStrings, nil
 }
 
 func (f *Firewall) Cleanup() error {
@@ -187,13 +134,13 @@ func (m *MockFirewallCore) InitRules() error {
 	return nil
 }
 
-func (m *MockFirewallCore) AddToRules(ip string) error {
-	slog.Info("添加到Mock防火墙规则", "ip", ip)
+func (m *MockFirewallCore) AddToRules(ipNet string) error {
+	slog.Info("添加到Mock防火墙规则", "ip", ipNet)
 	return nil
 }
 
-func (m *MockFirewallCore) RemoveFromRules(ip string) error {
-	slog.Info("从Mock防火墙规则中删除", "ip", ip)
+func (m *MockFirewallCore) RemoveFromRules(ipNet string) error {
+	slog.Info("从Mock防火墙规则中删除", "ip", ipNet)
 	return nil
 }
 

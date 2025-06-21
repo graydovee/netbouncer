@@ -12,10 +12,21 @@ type TrafficData struct {
 	Connections     int     `json:"connections"`       // 连接数
 	FirstSeen       string  `json:"first_seen"`        // 首次发现时间
 	LastSeen        string  `json:"last_seen"`         // 最后活动时间
+	IsBanned        bool    `json:"is_banned"`         // 是否被ban
 }
 
 type BannedIpNet struct {
-	IpNet     string `json:"ip_net"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	IpNet     string         `json:"ip_net"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+	Group     *BannedIpGroup `json:"group"`
+}
+
+type BannedIpGroup struct {
+	ID          uint   `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	IsDefault   bool   `json:"is_default"`
 }

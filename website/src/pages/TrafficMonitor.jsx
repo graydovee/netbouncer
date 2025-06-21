@@ -89,7 +89,6 @@ const columns = [
 
 function TrafficMonitor() {
   const [trafficData, setTrafficData] = useState([]);
-  const [bannedIPs, setBannedIPs] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -102,22 +101,6 @@ function TrafficMonitor() {
   
   // 使用消息提示Hook
   const { snackbar, showMessage, hideMessage } = useMessageSnackbar();
-
-  // 获取禁用IP列表
-  const fetchBannedIPs = useCallback(async () => {
-    try {
-      const response = await fetch('/api/banned');
-      const result = await response.json();
-      if (result.code === 200) {
-        // 新的响应格式是BannedIpNet数组，需要提取ip_net字段
-        const bannedIpNets = result.data || [];
-        const bannedIPSet = new Set(bannedIpNets.map(item => item.ip_net));
-        setBannedIPs(bannedIPSet);
-      }
-    } catch (error) {
-      console.error('获取禁用IP列表失败:', error);
-    }
-  }, []);
 
   // 获取流量数据
   const fetchTrafficData = useCallback(async (showLoading = false) => {
@@ -153,8 +136,10 @@ function TrafficMonitor() {
       });
       const result = await response.json();
       if (result.code === 200) {
-        setBannedIPs(prev => new Set([...prev, ip]));
-        await fetchTrafficData(false); // 不显示loading状态
+        // 更新本地数据，将对应IP标记为已禁用
+        setTrafficData(prev => prev.map(item => 
+          item.remote_ip === ip ? { ...item, is_banned: true } : item
+        ));
         showMessage(`成功禁用 ${ip}`);
       } else {
         showMessage('禁用失败: ' + result.message, 'error');
@@ -191,11 +176,10 @@ function TrafficMonitor() {
     }
     const timer = setInterval(() => {
       fetchTrafficData(false); // 自动刷新时不显示loading状态
-      fetchBannedIPs();
     }, refreshInterval * 1000);
     setRefreshTimer(timer);
     setIsRefreshing(true);
-  }, [refreshInterval, fetchTrafficData, fetchBannedIPs]);
+  }, [refreshInterval, fetchTrafficData]);
 
   // 停止自动刷新
   const stopRefresh = useCallback(() => {
@@ -208,10 +192,7 @@ function TrafficMonitor() {
 
   // 手动刷新
   const handleManualRefresh = async () => {
-    await Promise.all([
-      fetchTrafficData(false), // 手动刷新时不显示loading状态
-      fetchBannedIPs()
-    ]);
+    await fetchTrafficData(false); // 手动刷新时不显示loading状态
   };
 
   // 切换刷新状态
@@ -226,7 +207,6 @@ function TrafficMonitor() {
   // 初始化
   useEffect(() => {
     fetchTrafficData(true); // 首次加载时显示loading状态
-    fetchBannedIPs();
     startRefresh();
     
     return () => {
@@ -378,15 +358,15 @@ function TrafficMonitor() {
                       {formatTimestamp(row.last_seen)}
                     </TableCell>
                     <TableCell>
-                      <Tooltip title={bannedIPs.has(row.remote_ip) ? '已禁用' : '禁用此IP'}>
+                      <Tooltip title={row.is_banned ? '已禁用' : '禁用此IP'}>
                         <Button
                           variant="outlined"
                           size="small"
                           color="error"
-                          disabled={bannedIPs.has(row.remote_ip)}
+                          disabled={row.is_banned}
                           onClick={() => banIP(row.remote_ip)}
                         >
-                          {bannedIPs.has(row.remote_ip) ? '已禁用' : '禁用'}
+                          {row.is_banned ? '已禁用' : '禁用'}
                         </Button>
                       </Tooltip>
                     </TableCell>

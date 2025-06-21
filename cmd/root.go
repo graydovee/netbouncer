@@ -54,17 +54,14 @@ func init() {
 	// Web配置
 	rootCmd.Flags().StringVarP(&cfg.Web.Listen, "listen", "l", cfg.Web.Listen, "Web服务监听地址")
 
-	// 存储配置
-	rootCmd.Flags().StringVarP(&cfg.Storage.Type, "storage", "s", cfg.Storage.Type, "存储类型 (memory|database)")
-
 	// 数据库配置
-	rootCmd.Flags().StringVar(&cfg.Storage.Database.Driver, "db-driver", cfg.Storage.Database.Driver, "数据库驱动 (sqlite|mysql|postgres)")
-	rootCmd.Flags().StringVar(&cfg.Storage.Database.Host, "db-host", cfg.Storage.Database.Host, "数据库主机地址")
-	rootCmd.Flags().IntVar(&cfg.Storage.Database.Port, "db-port", cfg.Storage.Database.Port, "数据库端口号")
-	rootCmd.Flags().StringVar(&cfg.Storage.Database.Username, "db-username", cfg.Storage.Database.Username, "数据库用户名")
-	rootCmd.Flags().StringVar(&cfg.Storage.Database.Password, "db-password", cfg.Storage.Database.Password, "数据库密码")
-	rootCmd.Flags().StringVar(&cfg.Storage.Database.Database, "db-name", cfg.Storage.Database.Database, "数据库名称或文件路径")
-	rootCmd.Flags().StringVar(&cfg.Storage.Database.DSN, "db-dsn", cfg.Storage.Database.DSN, "数据库连接字符串")
+	rootCmd.Flags().StringVar(&cfg.Database.Driver, "db-driver", cfg.Database.Driver, "数据库驱动 (sqlite|mysql|postgres)")
+	rootCmd.Flags().StringVar(&cfg.Database.Host, "db-host", cfg.Database.Host, "数据库主机地址")
+	rootCmd.Flags().IntVar(&cfg.Database.Port, "db-port", cfg.Database.Port, "数据库端口号")
+	rootCmd.Flags().StringVar(&cfg.Database.Username, "db-username", cfg.Database.Username, "数据库用户名")
+	rootCmd.Flags().StringVar(&cfg.Database.Password, "db-password", cfg.Database.Password, "数据库密码")
+	rootCmd.Flags().StringVar(&cfg.Database.Database, "db-name", cfg.Database.Database, "数据库名称或文件路径")
+	rootCmd.Flags().StringVar(&cfg.Database.DSN, "db-dsn", cfg.Database.DSN, "数据库连接字符串")
 
 	// 添加使用示例
 	rootCmd.Example = `  # 使用默认配置启动
@@ -127,21 +124,22 @@ func run() error {
 	defer mon.Stop()
 
 	// 首先创建IP存储
-	ipStore, err := store.NewIpStore(&cfg.Storage)
+	ipStore, err := store.NewIpStore(&cfg.Database)
 	if err != nil {
 		return fmt.Errorf("创建IP存储器失败: %w", err)
 	}
 
 	// 创建防火墙
-	fw, err := core.NewFirewallFromConfig(&cfg.Firewall, ipStore)
+	fw, err := core.NewFirewallFromConfig(&cfg.Firewall)
 	if err != nil {
 		return fmt.Errorf("创建防火墙失败: %w", err)
 	}
-	if err := fw.Init(); err != nil {
-		return fmt.Errorf("初始化防火墙失败: %w", err)
-	}
 
 	svc := service.NewNetService(mon, fw, ipStore)
+	if err := svc.Init(); err != nil {
+		return fmt.Errorf("初始化失败: %w", err)
+	}
+
 	server := web.NewServer(svc)
 	slog.Info("Web服务已启动", "listen", cfg.Web.Listen)
 	if err := server.Start(cfg.Web.Listen); err != nil {

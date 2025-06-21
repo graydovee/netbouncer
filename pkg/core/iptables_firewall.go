@@ -57,14 +57,14 @@ func (i *IptablesFirewallCore) InitRules() error {
 	return nil
 }
 
-func (i *IptablesFirewallCore) AddToRules(ip string) error {
-	slog.Info("添加到iptables规则", "ip", ip, "cmd", "iptables -A "+i.chain+" -s "+ip+" -j DROP")
-	return i.ipt.AppendUnique("filter", i.chain, "-s", ip, "-j", "DROP")
+func (i *IptablesFirewallCore) AddToRules(ipNet string) error {
+	slog.Info("添加到iptables规则", "ip", ipNet, "cmd", "iptables -A "+i.chain+" -s "+ipNet+" -j DROP")
+	return i.ipt.AppendUnique("filter", i.chain, "-s", ipNet, "-j", "DROP")
 }
 
-func (i *IptablesFirewallCore) RemoveFromRules(ip string) error {
-	slog.Info("从iptables规则中删除", "ip", ip, "cmd", "iptables -D "+i.chain+" -s "+ip+" -j DROP")
-	return i.ipt.Delete("filter", i.chain, "-s", ip, "-j", "DROP")
+func (i *IptablesFirewallCore) RemoveFromRules(ipNet string) error {
+	slog.Info("从iptables规则中删除", "ip", ipNet, "cmd", "iptables -D "+i.chain+" -s "+ipNet+" -j DROP")
+	return i.ipt.Delete("filter", i.chain, "-s", ipNet, "-j", "DROP")
 }
 
 func (i *IptablesFirewallCore) CleanupRules() error {

@@ -57,17 +57,14 @@ func DefaultConfig() *Config {
 		Web: WebConfig{
 			Listen: "0.0.0.0:8080",
 		},
-		Storage: StorageConfig{
-			Type: "database",
-			Database: DatabaseConfig{
-				Driver:   "sqlite",
-				Host:     "",
-				Port:     0,
-				Username: "",
-				Password: "",
-				Database: "netbouncer.db",
-				DSN:      "",
-			},
+		Database: DatabaseConfig{
+			Driver:   "sqlite",
+			Host:     "",
+			Port:     0,
+			Username: "",
+			Password: "",
+			Database: "netbouncer.db",
+			DSN:      "",
 		},
 	}
 }

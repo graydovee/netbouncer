@@ -17,20 +17,15 @@ firewall:
 web:
   listen: "0.0.0.0:8080"  # Web服务监听地址
 
-# 存储配置
-storage:
-  type: "database"  # "memory" 或 "database"
-  database:
-    driver: "sqlite"        # "sqlite", "mysql", "postgres"
-    host: ""                # 数据库主机地址（sqlite不需要）
-    port: 0                 # 数据库端口号（sqlite不需要）
-    username: ""            # 数据库用户名（sqlite不需要）
-    password: ""            # 数据库密码（sqlite不需要）
-    database: "netbouncer.db"  # 数据库名称或文件路径
-    dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
-
-# 调试模式
-debug: false
+# 数据库配置
+database:
+  driver: "sqlite"        # "sqlite", "mysql", "postgres"
+  host: ""                # 数据库主机地址（sqlite不需要）
+  port: 0                 # 数据库端口号（sqlite不需要）
+  username: ""            # 数据库用户名（sqlite不需要）
+  password: ""            # 数据库密码（sqlite不需要）
+  database: "netbouncer.db"  # 数据库名称或文件路径
+  dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
 
 # 使用内存存储的配置示例：
 # storage:

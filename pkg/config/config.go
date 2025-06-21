@@ -5,7 +5,7 @@ type Config struct {
 	Monitor  MonitorConfig  `yaml:"monitor"`
 	Firewall FirewallConfig `yaml:"firewall"`
 	Web      WebConfig      `yaml:"web"`
-	Storage  StorageConfig  `yaml:"storage"`
+	Database DatabaseConfig `yaml:"database"`
 }
 
 // MonitorConfig 网络和监控配置
@@ -34,12 +34,6 @@ type FirewallConfig struct {
 // WebConfig Web服务配置
 type WebConfig struct {
 	Listen string `yaml:"listen"` // Web服务监听地址
-}
-
-// StorageConfig 存储配置
-type StorageConfig struct {
-	Type     string         `yaml:"type"`     // "memory" 或 "database"
-	Database DatabaseConfig `yaml:"database"` // 数据库配置
 }
 
 // DatabaseConfig 数据库配置

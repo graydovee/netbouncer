@@ -9,7 +9,7 @@ DOCKER_TAG := $(if $(filter yes,$(CURRENT_COMMIT_HAS_TAG)),$(GIT_TAG),$(PREV_TAG
 
 .PHONY: all build run clean tidy docker-build docker-release build-web clean-web clean-go web-dev
 
-all: build-web build
+all: build-web build-go
 
 tidy:
 	go mod tidy
@@ -37,7 +37,7 @@ debug:
 	./bin/netbouncer --debug
 
 run:
-	./bin/netbouncer
+	./bin/netbouncer -c config.yaml
 
 clean-web:
 	rm -rf web

@@ -20,6 +20,7 @@ import {
   Menu as MenuIcon,
   Monitor as MonitorIcon,
   Block as BlockIcon,
+  Group as GroupIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material';
@@ -29,6 +30,7 @@ const drawerWidth = 240;
 const menuItems = [
   { text: '网络流量监控', icon: <MonitorIcon />, path: '/' },
   { text: '禁用IP管理', icon: <BlockIcon />, path: '/banned' },
+  { text: '组管理', icon: <GroupIcon />, path: '/groups' },
 ];
 
 function Layout({ children }) {
