@@ -66,16 +66,28 @@ jobs:
           if [ -n "$PREVIOUS_TAG" ]; then
             # 如果有上一个tag，获取从上一个tag到当前tag的commit
             COMMITS=$(git log --pretty=format:"- %s (%h) - %an" $PREVIOUS_TAG..$TAG_NAME)
-            RELEASE_NOTES="## 版本 $TAG_NAME 更新内容\n\n### 提交记录\n\n$COMMITS"
+            cat > release_notes.md << EOF
+          ## 版本 $TAG_NAME 更新内容
+
+          ### 提交记录
+
+          $COMMITS
+          EOF
           else
             # 如果是第一个tag，获取所有commit
             COMMITS=$(git log --pretty=format:"- %s (%h) - %an" --reverse)
-            RELEASE_NOTES="## 版本 $TAG_NAME 更新内容\n\n### 提交记录\n\n$COMMITS"
+            cat > release_notes.md << EOF
+          ## 版本 $TAG_NAME 更新内容
+
+          ### 提交记录
+
+          $COMMITS
+          EOF
           fi
           
           # 设置输出变量
           echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          cat release_notes.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
