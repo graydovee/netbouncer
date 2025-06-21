@@ -23,6 +23,20 @@ import {
 } from '@mui/icons-material';
 import { useMessageSnackbar, MessageSnackbar } from '../components/MessageSnackbar';
 
+// 格式化时间戳
+const formatTimestamp = (timestamp) => {
+  if (!timestamp) return '-';
+  const date = new Date(timestamp);
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+};
+
 function BannedIPs() {
   const [bannedIPs, setBannedIPs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -41,7 +55,9 @@ function BannedIPs() {
       const response = await fetch('/api/banned');
       const result = await response.json();
       if (result.code === 200) {
-        setBannedIPs(result.data || []);
+        // 新的响应格式是BannedIpNet数组
+        const bannedIpNets = result.data || [];
+        setBannedIPs(bannedIpNets);
       } else {
         setError('获取数据失败: ' + result.message);
       }
@@ -92,12 +108,12 @@ function BannedIPs() {
       const response = await fetch('/api/ban', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: newIP.trim() })
+        body: JSON.stringify({ ip_net: newIP.trim() })
       });
       const result = await response.json();
       if (result.code === 200) {
-        // 添加到列表中
-        setBannedIPs(prev => [...prev, newIP.trim()]);
+        // 禁用成功后重新获取完整的列表，确保包含时间信息
+        await fetchBannedIPs();
         setNewIP(''); // 清空输入框
         showMessage(`成功禁用 ${newIP.trim()}`);
       } else {
@@ -116,12 +132,12 @@ function BannedIPs() {
       const response = await fetch('/api/unban', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip })
+        body: JSON.stringify({ ip_net: ip })
       });
       const result = await response.json();
       if (result.code === 200) {
         // 从列表中移除该IP
-        setBannedIPs(prev => prev.filter(bannedIP => bannedIP !== ip));
+        setBannedIPs(prev => prev.filter(bannedIP => bannedIP.ip_net !== ip));
         showMessage(`成功解禁 ${ip}`);
       } else {
         showMessage('解禁失败: ' + result.message, 'error');
@@ -214,28 +230,36 @@ function BannedIPs() {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ fontWeight: 'bold' }}>IP地址或CIDR</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>禁用时间</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>更新时间</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>操作</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={2} align="center">
+                  <TableCell colSpan={4} align="center">
                     <CircularProgress size={24} />
                     <Typography sx={{ ml: 1 }}>加载中...</Typography>
                   </TableCell>
                 </TableRow>
               ) : bannedIPs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={2} align="center">
+                  <TableCell colSpan={4} align="center">
                     暂无已禁用IP
                   </TableCell>
                 </TableRow>
               ) : (
-                bannedIPs.map((ip, index) => (
+                bannedIPs.map((bannedIP, index) => (
                   <TableRow key={index} hover>
                     <TableCell sx={{ fontFamily: 'monospace', fontSize: '1rem' }}>
-                      {ip}
+                      {bannedIP.ip_net}
+                    </TableCell>
+                    <TableCell sx={{ color: 'text.secondary', fontSize: '0.875rem' }}>
+                      {formatTimestamp(bannedIP.created_at)}
+                    </TableCell>
+                    <TableCell sx={{ color: 'text.secondary', fontSize: '0.875rem' }}>
+                      {formatTimestamp(bannedIP.updated_at)}
                     </TableCell>
                     <TableCell>
                       <Tooltip title="解禁此IP或CIDR">
@@ -244,7 +268,7 @@ function BannedIPs() {
                           size="small"
                           color="primary"
                           startIcon={<BlockIcon />}
-                          onClick={() => unbanIP(ip)}
+                          onClick={() => unbanIP(bannedIP.ip_net)}
                         >
                           解禁
                         </Button>

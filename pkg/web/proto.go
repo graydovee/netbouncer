@@ -18,10 +18,6 @@ type Response struct {
 	Data    any    `json:"data"`
 }
 
-type IPRequest struct {
-	IP string `json:"ip"`
-}
-
 // 辅助方法
 func Success(data any) Response {
 	return Response{
@@ -37,4 +33,13 @@ func Error(code int, msg string) Response {
 		Message: msg,
 		Data:    nil,
 	}
+}
+
+type IPRequest struct {
+	IpNet string `json:"ip_net"`
+}
+
+// BatchIPRequest 批量IP/网段操作请求
+type BatchIPRequest struct {
+	IpNets []string `json:"ip_nets"`
 }

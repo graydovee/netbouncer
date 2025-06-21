@@ -106,18 +106,18 @@ func (i *IpSetFirewallCore) setupIptables() error {
 
 func (i *IpSetFirewallCore) AddToRules(ipOrCidr string) error {
 	// 解析IP或CIDR
-	ip, ipNet, err := net.ParseCIDR(ipOrCidr)
+	_, ipNet, err := net.ParseCIDR(ipOrCidr)
 	if err != nil {
 		// 如果不是CIDR格式，尝试解析为单个IP
-		ip = net.ParseIP(ipOrCidr)
-		if ip == nil {
+		parsedIP := net.ParseIP(ipOrCidr)
+		if parsedIP == nil {
 			return fmt.Errorf("无效的IP或CIDR格式: %s", ipOrCidr)
 		}
 		// 单个IP转换为/32或/128 CIDR
-		if ip.To4() != nil {
-			ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
+		if parsedIP.To4() != nil {
+			ipNet = &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(32, 32)}
 		} else {
-			ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}
+			ipNet = &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(128, 128)}
 		}
 	}
 
@@ -136,18 +136,18 @@ func (i *IpSetFirewallCore) AddToRules(ipOrCidr string) error {
 
 func (i *IpSetFirewallCore) RemoveFromRules(ipOrCidr string) error {
 	// 解析IP或CIDR
-	ip, ipNet, err := net.ParseCIDR(ipOrCidr)
+	_, ipNet, err := net.ParseCIDR(ipOrCidr)
 	if err != nil {
 		// 如果不是CIDR格式，尝试解析为单个IP
-		ip = net.ParseIP(ipOrCidr)
-		if ip == nil {
+		parsedIP := net.ParseIP(ipOrCidr)
+		if parsedIP == nil {
 			return fmt.Errorf("无效的IP或CIDR格式: %s", ipOrCidr)
 		}
 		// 单个IP转换为/32或/128 CIDR
-		if ip.To4() != nil {
-			ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
+		if parsedIP.To4() != nil {
+			ipNet = &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(32, 32)}
 		} else {
-			ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}
+			ipNet = &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(128, 128)}
 		}
 	}
 

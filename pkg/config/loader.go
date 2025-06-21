@@ -50,9 +50,9 @@ func DefaultConfig() *Config {
 			Timeout:        60 * 60 * 24, // 24小时
 		},
 		Firewall: FirewallConfig{
-			Chain:        "NETBOUNCER",
-			IpSet:        "netbouncer",
-			DisableIpSet: false,
+			Chain: "NETBOUNCER",
+			IpSet: "netbouncer",
+			Type:  "ipset",
 		},
 		Web: WebConfig{
 			Listen: "0.0.0.0:8080",
@@ -69,6 +69,5 @@ func DefaultConfig() *Config {
 				DSN:      "",
 			},
 		},
-		Debug: false,
 	}
 }

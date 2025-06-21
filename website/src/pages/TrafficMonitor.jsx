@@ -109,7 +109,10 @@ function TrafficMonitor() {
       const response = await fetch('/api/banned');
       const result = await response.json();
       if (result.code === 200) {
-        setBannedIPs(new Set(result.data));
+        // 新的响应格式是BannedIpNet数组，需要提取ip_net字段
+        const bannedIpNets = result.data || [];
+        const bannedIPSet = new Set(bannedIpNets.map(item => item.ip_net));
+        setBannedIPs(bannedIPSet);
       }
     } catch (error) {
       console.error('获取禁用IP列表失败:', error);
@@ -146,7 +149,7 @@ function TrafficMonitor() {
       const response = await fetch('/api/ban', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip })
+        body: JSON.stringify({ ip_net: ip })
       });
       const result = await response.json();
       if (result.code === 200) {

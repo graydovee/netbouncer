@@ -1,6 +1,5 @@
 package service
 
-
 type TrafficData struct {
 	RemoteIP        string  `json:"remote_ip"`         // 远程IP
 	LocalIP         string  `json:"local_ip"`          // 本地IP
@@ -13,4 +12,10 @@ type TrafficData struct {
 	Connections     int     `json:"connections"`       // 连接数
 	FirstSeen       string  `json:"first_seen"`        // 首次发现时间
 	LastSeen        string  `json:"last_seen"`         // 最后活动时间
+}
+
+type BannedIpNet struct {
+	IpNet     string `json:"ip_net"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }

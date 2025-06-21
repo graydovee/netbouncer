@@ -6,7 +6,6 @@ type Config struct {
 	Firewall FirewallConfig `yaml:"firewall"`
 	Web      WebConfig      `yaml:"web"`
 	Storage  StorageConfig  `yaml:"storage"`
-	Debug    bool           `yaml:"debug"`
 }
 
 // MonitorConfig 网络和监控配置
@@ -17,11 +16,19 @@ type MonitorConfig struct {
 	Timeout        int    `yaml:"timeout"`         // 连接超时时间（秒）
 }
 
+type FirewallType string
+
+const (
+	FirewallTypeIptables FirewallType = "iptables"
+	FirewallTypeIpSet    FirewallType = "ipset"
+	FirewallTypeMock     FirewallType = "mock"
+)
+
 // FirewallConfig 防火墙配置
 type FirewallConfig struct {
-	Chain        string `yaml:"chain"`         // iptables链名称
-	IpSet        string `yaml:"ipset"`         // ipset名称，如果设置则使用ipset
-	DisableIpSet bool   `yaml:"disable_ipset"` // 是否禁用ipset
+	Chain string `yaml:"chain"` // iptables链名称
+	IpSet string `yaml:"ipset"` // ipset名称，如果设置则使用ipset
+	Type  string `yaml:"type"`  // 防火墙类型，"iptables" 或 "ipset" 或 "mock"
 }
 
 // WebConfig Web服务配置
@@ -44,14 +51,4 @@ type DatabaseConfig struct {
 	Password string `yaml:"password"` // 数据库密码
 	Database string `yaml:"database"` // 数据库名称或文件路径
 	DSN      string `yaml:"dsn"`      // 数据库连接字符串
-}
-
-// GetStorageType 获取存储类型，兼容旧版本
-func (c *Config) GetStorageType() string {
-	return c.Storage.Type
-}
-
-// GetDatabaseConfig 获取数据库配置，兼容旧版本
-func (c *Config) GetDatabaseConfig() *DatabaseConfig {
-	return &c.Storage.Database
 }

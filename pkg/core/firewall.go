@@ -7,49 +7,37 @@ import (
 	"os/signal"
 	"sort"
 	"syscall"
-	"time"
 
 	"github.com/graydovee/netbouncer/pkg/config"
 	"github.com/graydovee/netbouncer/pkg/store"
 )
 
 // NewFirewallFromConfig 根据配置创建相应的防火墙实例
-func NewFirewallFromConfig(cfg *config.Config) (*Firewall, error) {
-	// 首先创建IP存储
-	ipStore, err := store.NewIpStore(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create IP store: %w", err)
-	}
-
+func NewFirewallFromConfig(cfg *config.FirewallConfig, ipStore store.IpStore) (*Firewall, error) {
 	var core FirewallCore
 
-	// 根据配置创建相应的防火墙核心
-	if cfg.Debug {
-		// 调试模式使用Mock防火墙
-		slog.Info("使用Mock防火墙")
+	switch config.FirewallType(cfg.Type) {
+	case config.FirewallTypeMock:
 		core = &MockFirewallCore{}
-	} else if !cfg.Firewall.DisableIpSet {
+	case config.FirewallTypeIpSet:
 		// 如果配置了ipset，使用ipset防火墙
-		if cfg.Firewall.Chain == "" {
+		if cfg.Chain == "" {
 			return nil, fmt.Errorf("ipset chain is required")
 		}
-		if cfg.Firewall.IpSet == "" {
+		if cfg.IpSet == "" {
 			return nil, fmt.Errorf("ipset name is required")
 		}
-		slog.Info("使用IpSet防火墙", "ipset", cfg.Firewall.IpSet, "chain", cfg.Firewall.Chain)
+		slog.Info("使用IpSet防火墙", "ipset", cfg.IpSet, "chain", cfg.Chain)
 		core = &IpSetFirewallCore{
-			ipset: cfg.Firewall.IpSet,
-			chain: cfg.Firewall.Chain,
+			ipset: cfg.IpSet,
+			chain: cfg.Chain,
 		}
-	} else {
-		// 默认使用iptables防火墙
-		if cfg.Firewall.Chain == "" {
-			return nil, fmt.Errorf("iptables chain is required")
-		}
-		slog.Info("使用Iptables防火墙", "chain", cfg.Firewall.Chain)
+	case config.FirewallTypeIptables:
 		core = &IptablesFirewallCore{
-			chain: cfg.Firewall.Chain,
+			chain: cfg.Chain,
 		}
+	default:
+		return nil, fmt.Errorf("invalid firewall type: %s", cfg.Type)
 	}
 
 	return NewFirewall(ipStore, core), nil
@@ -113,10 +101,10 @@ func (f *Firewall) Init() error {
 	}
 
 	for _, ip := range ips {
-		err = f.core.AddToRules(ip.Ip)
+		err = f.core.AddToRules(ip.IpNet)
 		if err != nil {
 			_ = f.core.CleanupRules()
-			return fmt.Errorf("初始化IP规则失败 %s: %w", ip.Ip, err)
+			return fmt.Errorf("初始化IP规则失败 %s: %w", ip.IpNet, err)
 		}
 	}
 
@@ -125,8 +113,7 @@ func (f *Firewall) Init() error {
 
 func (f *Firewall) Ban(ip string) error {
 	// 检查IP是否已经在黑名单中
-	ipRecord := store.Ip{Ip: ip}
-	if f.ipStore.IsInBlacklist(ipRecord) {
+	if f.ipStore.IsInBlacklist(ip) {
 		return nil
 	}
 
@@ -137,10 +124,7 @@ func (f *Firewall) Ban(ip string) error {
 	}
 
 	// 添加到存储
-	now := time.Now()
-	ipRecord.CreatedAt = now
-	ipRecord.UpdatedAt = now
-	err = f.ipStore.AddIpBlacklist(ipRecord)
+	err = f.ipStore.AddIpBlacklist(ip)
 	if err != nil {
 		// 如果存储失败，需要从防火墙规则中删除
 		_ = f.core.RemoveFromRules(ip)
@@ -152,8 +136,7 @@ func (f *Firewall) Ban(ip string) error {
 
 func (f *Firewall) Unban(ip string) error {
 	// 检查IP是否在黑名单中
-	ipRecord := store.Ip{Ip: ip}
-	if !f.ipStore.IsInBlacklist(ipRecord) {
+	if !f.ipStore.IsInBlacklist(ip) {
 		return nil
 	}
 
@@ -164,7 +147,7 @@ func (f *Firewall) Unban(ip string) error {
 	}
 
 	// 从存储中删除
-	err = f.ipStore.RemoveIpBlacklist(ipRecord)
+	err = f.ipStore.RemoveIpBlacklist(ip)
 	if err != nil {
 		// 如果存储删除失败，需要重新添加到防火墙规则
 		_ = f.core.AddToRules(ip)
@@ -175,8 +158,7 @@ func (f *Firewall) Unban(ip string) error {
 }
 
 func (f *Firewall) IsBanned(ip string) bool {
-	ipRecord := store.Ip{Ip: ip}
-	return f.ipStore.IsInBlacklist(ipRecord)
+	return f.ipStore.IsInBlacklist(ip)
 }
 
 func (f *Firewall) GetBannedIPs() ([]string, error) {
@@ -187,7 +169,7 @@ func (f *Firewall) GetBannedIPs() ([]string, error) {
 
 	ipStrings := make([]string, len(ips))
 	for i, ip := range ips {
-		ipStrings[i] = ip.Ip
+		ipStrings[i] = ip.IpNet
 	}
 	sort.Strings(ipStrings)
 	return ipStrings, nil

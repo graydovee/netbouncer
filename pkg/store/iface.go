@@ -2,23 +2,15 @@ package store
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/graydovee/netbouncer/pkg/config"
 )
 
-type Ip struct {
-	Id        int64     `json:"id"`
-	Ip        string    `json:"ip"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 type IpStore interface {
-	AddIpBlacklist(ip Ip) error
-	RemoveIpBlacklist(ip Ip) error
-	IsInBlacklist(ip Ip) bool
-	GetBlacklist() ([]Ip, error)
+	AddIpBlacklist(ipnet string) error
+	RemoveIpBlacklist(ipnet string) error
+	IsInBlacklist(ipnet string) bool
+	GetBlacklist() ([]BannedIpNet, error)
 }
 
 var (
@@ -27,17 +19,17 @@ var (
 )
 
 // NewIpStore 根据配置创建IP存储实例
-func NewIpStore(cfg *config.Config) (IpStore, error) {
-	switch cfg.GetStorageType() {
+func NewIpStore(cfg *config.StorageConfig) (IpStore, error) {
+	switch cfg.Type {
 	case "memory":
 		return NewMemoryIpStore(), nil
 	case "database":
-		db, err := NewDatabase(cfg.GetDatabaseConfig())
+		db, err := NewDatabase(&cfg.Database)
 		if err != nil {
 			return nil, err
 		}
 		return NewDbIpStore(db)
 	default:
-		return nil, fmt.Errorf("unsupported storage type: %s", cfg.GetStorageType())
+		return nil, fmt.Errorf("unsupported storage type: %s", cfg.Type)
 	}
 }

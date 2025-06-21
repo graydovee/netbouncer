@@ -28,7 +28,7 @@ const drawerWidth = 240;
 
 const menuItems = [
   { text: '网络流量监控', icon: <MonitorIcon />, path: '/' },
-  { text: '已禁用IP管理', icon: <BlockIcon />, path: '/banned' },
+  { text: '禁用IP管理', icon: <BlockIcon />, path: '/banned' },
 ];
 
 function Layout({ children }) {

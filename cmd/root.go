@@ -13,6 +13,7 @@ import (
 	"github.com/graydovee/netbouncer/pkg/config"
 	"github.com/graydovee/netbouncer/pkg/core"
 	"github.com/graydovee/netbouncer/pkg/service"
+	"github.com/graydovee/netbouncer/pkg/store"
 	"github.com/graydovee/netbouncer/pkg/web"
 	"github.com/spf13/cobra"
 )
@@ -48,7 +49,7 @@ func init() {
 	// 防火墙配置
 	rootCmd.Flags().StringVarP(&cfg.Firewall.Chain, "firewall-chain", "n", cfg.Firewall.Chain, "iptables链名称")
 	rootCmd.Flags().StringVarP(&cfg.Firewall.IpSet, "firewall-ipset", "p", cfg.Firewall.IpSet, "ipset名称")
-	rootCmd.Flags().BoolVar(&cfg.Firewall.DisableIpSet, "firewall-disable-ipset", cfg.Firewall.DisableIpSet, "是否禁用ipset")
+	rootCmd.Flags().StringVarP(&cfg.Firewall.Type, "firewall-type", "f", string(cfg.Firewall.Type), "防火墙类型 (iptables|ipset|mock)")
 
 	// Web配置
 	rootCmd.Flags().StringVarP(&cfg.Web.Listen, "listen", "l", cfg.Web.Listen, "Web服务监听地址")
@@ -64,9 +65,6 @@ func init() {
 	rootCmd.Flags().StringVar(&cfg.Storage.Database.Password, "db-password", cfg.Storage.Database.Password, "数据库密码")
 	rootCmd.Flags().StringVar(&cfg.Storage.Database.Database, "db-name", cfg.Storage.Database.Database, "数据库名称或文件路径")
 	rootCmd.Flags().StringVar(&cfg.Storage.Database.DSN, "db-dsn", cfg.Storage.Database.DSN, "数据库连接字符串")
-
-	// 调试配置
-	rootCmd.Flags().BoolVar(&cfg.Debug, "debug", cfg.Debug, "启用调试模式")
 
 	// 添加使用示例
 	rootCmd.Example = `  # 使用默认配置启动
@@ -128,8 +126,14 @@ func run() error {
 	}
 	defer mon.Stop()
 
+	// 首先创建IP存储
+	ipStore, err := store.NewIpStore(&cfg.Storage)
+	if err != nil {
+		return fmt.Errorf("创建IP存储器失败: %w", err)
+	}
+
 	// 创建防火墙
-	fw, err := core.NewFirewallFromConfig(cfg)
+	fw, err := core.NewFirewallFromConfig(&cfg.Firewall, ipStore)
 	if err != nil {
 		return fmt.Errorf("创建防火墙失败: %w", err)
 	}
@@ -137,7 +141,7 @@ func run() error {
 		return fmt.Errorf("初始化防火墙失败: %w", err)
 	}
 
-	svc := service.NewNetService(mon, fw)
+	svc := service.NewNetService(mon, fw, ipStore)
 	server := web.NewServer(svc)
 	slog.Info("Web服务已启动", "listen", cfg.Web.Listen)
 	if err := server.Start(cfg.Web.Listen); err != nil {
