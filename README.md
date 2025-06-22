@@ -115,7 +115,49 @@ database:
   password: ""            # Database password
   database: "netbouncer.db"  # Database name or file path
   dsn: ""                 # Database connection string (optional)
+  log_level: "info"       # SQL log level: "silent", "error", "warn", "info"
+
+# Initial rules configuration
+rules:
+  # Example: Create a default blocked group
+  - group: "blocked"
+    groupDescription: "Default blocked group"
+    action: "block"
+    override: false
+    ipNets:
+      - "192.168.1.100"
+      - "10.0.0.0/24"
+  
+  # Example: Create a whitelist group
+  - group: "whitelist"
+    groupDescription: "Whitelist group"
+    action: "allow"
+    override: true
+    ipNets:
+      - "127.0.0.1"
+      - "192.168.1.1"
 ```
+
+### Rules Configuration
+
+The `rules` section allows you to pre-configure IP groups and rules that will be created automatically when the application starts. This is useful for setting up default block lists, whitelists, and other common configurations.
+
+#### Rules Configuration Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `group` | string | Yes | Group name to identify the rule group |
+| `groupDescription` | string | No | Group description explaining the purpose |
+| `action` | string | Yes | Action type: `block` or `allow` |
+| `override` | bool | No | Whether to override existing groups (default: false) |
+| `ipNets` | []string | Yes | List of IP addresses or CIDR ranges |
+
+#### Use Cases
+
+- **Pre-configured block lists**: Automatically create groups with known malicious IPs
+- **Whitelist configuration**: Pre-configure trusted IP addresses
+- **Testing environment**: Quickly set up test data for development
+- **Production environment**: Pre-configure necessary IP rules based on security policies
 
 ### Common Command Line Parameters
 
@@ -128,6 +170,7 @@ database:
 | `--listen` | `-l` | Web service listen address | 0.0.0.0:8080 |
 | `--db-driver` | - | Database driver (sqlite\|mysql\|postgres) | sqlite |
 | `--db-name` | - | Database name or file path | netbouncer.db |
+| `--db-log-level` | - | SQL log level (silent\|error\|warn\|info) | info |
 
 ## 🌐 Web Interface Usage
 

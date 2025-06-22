@@ -46,8 +46,12 @@ func NewFirewallFromConfig(cfg *config.FirewallConfig) (*Firewall, error) {
 type FirewallCore interface {
 	// 初始化防火墙规则
 	InitRules() error
-	// 设置IP的防火墙动作
-	SetAction(ipNet string, action string) error
+
+	Ban(ipNet string) error
+	RevertBan(ipNet string) error
+	Allow(ipNet string) error
+	RevertAllow(ipNet string) error
+
 	// 清理Ip的防火墙规则
 	CleanupIpNetRules(ipNet string) error
 	// 清理防火墙规则
@@ -93,7 +97,15 @@ func (f *Firewall) Init(ipList []store.IpNet) error {
 
 	// 从传入的IP列表中加载所有IP到防火墙规则
 	for _, ipnet := range ipList {
-		err = f.core.SetAction(ipnet.IpNet, ipnet.Action)
+
+		switch ipnet.Action {
+		case store.ActionBan:
+			err = f.core.Ban(ipnet.IpNet)
+		case store.ActionAllow:
+			err = f.core.Allow(ipnet.IpNet)
+		default:
+			return fmt.Errorf("不支持的防火墙动作: %s", ipnet.Action)
+		}
 		if err != nil {
 			_ = f.core.CleanupRules()
 			return fmt.Errorf("初始化IP规则失败 %s, action: %s: %w", ipnet.IpNet, ipnet.Action, err)
@@ -103,14 +115,20 @@ func (f *Firewall) Init(ipList []store.IpNet) error {
 	return nil
 }
 
-func (f *Firewall) SetAction(ipNet string, action string) error {
-	// 设置IP的防火墙动作
-	err := f.core.SetAction(ipNet, action)
-	if err != nil {
-		return fmt.Errorf("设置IP防火墙动作失败: %w", err)
-	}
+func (f *Firewall) Ban(ipNet string) error {
+	return f.core.Ban(ipNet)
+}
 
-	return nil
+func (f *Firewall) RevertBan(ipNet string) error {
+	return f.core.RevertBan(ipNet)
+}
+
+func (f *Firewall) Allow(ipNet string) error {
+	return f.core.Allow(ipNet)
+}
+
+func (f *Firewall) RevertAllow(ipNet string) error {
+	return f.core.RevertAllow(ipNet)
 }
 
 func (f *Firewall) CleanupIpNet(ipNet string) error {
@@ -129,15 +147,19 @@ func (m *MockFirewallCore) InitRules() error {
 	return nil
 }
 
-func (m *MockFirewallCore) SetAction(ipNet string, action string) error {
-	switch action {
-	case store.ActionBan:
-		slog.Info("设置IP防火墙动作", "ip", ipNet, "action", action)
-	case store.ActionAllow:
-		slog.Info("设置IP防火墙动作", "ip", ipNet, "action", action)
-	default:
-		slog.Warn("未知的防火墙动作", "ip", ipNet, "action", action)
-	}
+func (m *MockFirewallCore) Ban(ipNet string) error {
+	return nil
+}
+
+func (m *MockFirewallCore) RevertBan(ipNet string) error {
+	return nil
+}
+
+func (m *MockFirewallCore) Allow(ipNet string) error {
+	return nil
+}
+
+func (m *MockFirewallCore) RevertAllow(ipNet string) error {
 	return nil
 }
 

@@ -1,13 +1,18 @@
 package service
 
 import (
+	"errors"
 	"fmt"
-	"net"
+	"log/slog"
 	"time"
 
+	"github.com/graydovee/netbouncer/pkg/config"
 	"github.com/graydovee/netbouncer/pkg/core"
 	"github.com/graydovee/netbouncer/pkg/store"
+	"gorm.io/gorm"
 )
+
+const DefaultGroupName = "default"
 
 type NetService struct {
 	monitor  *core.Monitor
@@ -27,12 +32,12 @@ func NewNetService(monitor *core.Monitor, firewall *core.Firewall, store *store.
 }
 
 // Init 初始化服务
-func (s *NetService) Init() error {
+func (s *NetService) Init(items []config.RulesInitConfig) error {
 	// 确保存在默认组
 	_, err := s.store.IpNetGroupStore.FindDefault()
 	if err != nil {
 		// 如果没有默认组，创建一个
-		defaultGroup, err := s.store.IpNetGroupStore.Create("默认组", "系统默认的IP禁用组")
+		defaultGroup, err := s.store.IpNetGroupStore.Create(DefaultGroupName, "系统默认的IP禁用组")
 		if err != nil {
 			return fmt.Errorf("创建默认组失败: %w", err)
 		}
@@ -55,6 +60,39 @@ func (s *NetService) Init() error {
 		return err
 	}
 
+	// 初始化默认规则
+	groupCache := make(map[string]*store.IpNetGroup)
+	for _, item := range items {
+
+		group, ok := groupCache[item.Group]
+		if !ok {
+			var err error
+			group, err = s.store.IpNetGroupStore.FindByName(item.Group)
+			if err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				group, err = s.store.IpNetGroupStore.Create(item.Group, item.GroupDescription)
+				if err != nil {
+					return err
+				}
+			}
+			groupCache[item.Group] = group
+		}
+		for _, ipNet := range item.IpNets {
+			_, err := s.store.IpNetStore.FindByIpNet(ipNet)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			} else if err == nil && !item.Override {
+				slog.Info("初始化规则: 跳过已存在的规则", "ip", ipNet, "group", group.Name, "action", item.Action)
+				continue
+			}
+
+			s.CreateIpNet(ipNet, group.ID, item.Action)
+			slog.Info("初始化规则", "ip", ipNet, "group", group.Name, "action", item.Action)
+		}
+	}
+
 	return nil
 }
 
@@ -63,20 +101,21 @@ func (s *NetService) GetAllStats() ([]TrafficData, error) {
 	stats := s.monitor.GetAllStats()
 	trafficData := make([]TrafficData, 0, len(stats))
 
-	ipNets, err := s.store.IpNetStore.FindByAction(store.ActionBan)
+	bannedipNetEntity, err := s.store.IpNetStore.FindByAction(store.ActionBan)
 	if err != nil {
 		return nil, err
 	}
 
-	banedIpNets := make([]*net.IPNet, 0)
-	for _, ip := range ipNets {
-		if ip.Action == store.ActionBan {
-			banedIpNets = append(banedIpNets, convertToIpNet(ip)...)
-		}
+	allowIpNetEntity, err := s.store.IpNetStore.FindByAction(store.ActionAllow)
+	if err != nil {
+		return nil, err
 	}
 
+	bannedIpNets := convertToIpNet(bannedipNetEntity...)
+	allowIpNets := convertToIpNet(allowIpNetEntity...)
+
 	for _, stat := range stats {
-		isBanned := isContainIpNet(banedIpNets, stat.RemoteIP)
+		isBanned := IsBanned(bannedIpNets, allowIpNets, stat.RemoteIP)
 
 		trafficData = append(trafficData, TrafficData{
 			RemoteIP:        stat.RemoteIP,
@@ -101,20 +140,21 @@ func (s *NetService) GetStats() ([]TrafficData, error) {
 	stats := s.monitor.GetStats()
 	trafficData := make([]TrafficData, 0, len(stats))
 
-	ipNets, err := s.store.IpNetStore.FindByAction(store.ActionBan)
+	bannedipNetEntity, err := s.store.IpNetStore.FindByAction(store.ActionBan)
 	if err != nil {
 		return nil, err
 	}
 
-	banedIpNets := make([]*net.IPNet, 0)
-	for _, ip := range ipNets {
-		if ip.Action == store.ActionBan {
-			banedIpNets = append(banedIpNets, convertToIpNet(ip)...)
-		}
+	allowIpNetEntity, err := s.store.IpNetStore.FindByAction(store.ActionAllow)
+	if err != nil {
+		return nil, err
 	}
 
+	bannedIpNets := convertToIpNet(bannedipNetEntity...)
+	allowIpNets := convertToIpNet(allowIpNetEntity...)
+
 	for _, stat := range stats {
-		isBanned := isContainIpNet(banedIpNets, stat.RemoteIP)
+		isBanned := IsBanned(bannedIpNets, allowIpNets, stat.RemoteIP)
 
 		trafficData = append(trafficData, TrafficData{
 			RemoteIP:        stat.RemoteIP,
@@ -181,12 +221,34 @@ func (s *NetService) CreateIpNet(ipnet string, groupId uint, action string) erro
 		return err
 	}
 
-	err = s.firewall.SetAction(ipNet.IpNet, action)
+	err = s.applyAction(ipNet)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (s *NetService) applyAction(ipNet *store.IpNet) error {
+	switch ipNet.Action {
+	case store.ActionBan:
+		return s.firewall.Ban(ipNet.IpNet)
+	case store.ActionAllow:
+		return s.firewall.Allow(ipNet.IpNet)
+	default:
+		return fmt.Errorf("不支持的防火墙动作: %s", ipNet.Action)
+	}
+}
+
+func (s *NetService) revertAction(ipNet *store.IpNet) error {
+	switch ipNet.Action {
+	case store.ActionBan:
+		return s.firewall.RevertBan(ipNet.IpNet)
+	case store.ActionAllow:
+		return s.firewall.RevertAllow(ipNet.IpNet)
+	default:
+		return fmt.Errorf("不支持的防火墙动作: %s", ipNet.Action)
+	}
 }
 
 func (s *NetService) DeleteIpNet(id uint) error {
@@ -218,7 +280,14 @@ func (s *NetService) UpdateIpNetAction(id uint, action string) error {
 		return nil
 	}
 
-	err = s.firewall.SetAction(ipNet.IpNet, action)
+	err = s.revertAction(ipNet)
+	if err != nil {
+		return fmt.Errorf("撤销原有行为失败: %w", err)
+	}
+
+	ipNet.Action = action
+
+	err = s.applyAction(ipNet)
 	if err != nil {
 		return fmt.Errorf("应用新行为失败: %w", err)
 	}

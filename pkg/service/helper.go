@@ -59,3 +59,15 @@ func isContainIpNet(ipNet []*net.IPNet, ip string) bool {
 	}
 	return false
 }
+
+func IsBanned(bannedIpNets, allowIpNets []*net.IPNet, ip string) bool {
+	if isContainIpNet(allowIpNets, ip) {
+		return false
+	}
+
+	if isContainIpNet(bannedIpNets, ip) {
+		return true
+	}
+
+	return false
+}

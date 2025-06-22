@@ -26,6 +26,27 @@ database:
   password: ""            # 数据库密码（sqlite不需要）
   database: "netbouncer.db"  # 数据库名称或文件路径
   dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
+  log_level: "info"       # SQL日志级别: "silent", "error", "warn", "info"
+
+# 初始规则配置
+rules:
+  # 示例：创建一个默认的封禁组
+  - group: "blocked"
+    groupDescription: "默认封禁组"
+    action: "block"
+    override: false
+    ipNets:
+      - "192.168.1.100"
+      - "10.0.0.0/24"
+  
+  # 示例：创建一个白名单组
+  - group: "whitelist"
+    groupDescription: "白名单组"
+    action: "allow"
+    override: true
+    ipNets:
+      - "127.0.0.1"
+      - "192.168.1.1"
 
 # 防火墙类型配置示例：
 

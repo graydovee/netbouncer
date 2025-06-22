@@ -115,7 +115,49 @@ database:
   password: ""            # 数据库密码
   database: "netbouncer.db"  # 数据库名称或文件路径
   dsn: ""                 # 数据库连接字符串（可选）
+  log_level: "info"       # SQL日志级别: "silent", "error", "warn", "info"
+
+# 初始规则配置
+rules:
+  # 示例：创建一个默认的封禁组
+  - group: "blocked"
+    groupDescription: "默认封禁组"
+    action: "block"
+    override: false
+    ipNets:
+      - "192.168.1.100"
+      - "10.0.0.0/24"
+  
+  # 示例：创建一个白名单组
+  - group: "whitelist"
+    groupDescription: "白名单组"
+    action: "allow"
+    override: true
+    ipNets:
+      - "127.0.0.1"
+      - "192.168.1.1"
 ```
+
+### 规则配置说明
+
+`rules` 配置项允许您在应用启动时预配置IP分组和规则，这些规则将自动创建。这对于设置默认封禁列表、白名单和其他常用配置非常有用。
+
+#### 规则配置字段
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group` | string | 是 | 分组名称，用于标识该规则组 |
+| `groupDescription` | string | 否 | 分组描述，用于说明该组的用途 |
+| `action` | string | 是 | 动作类型：`block`（封禁）或 `allow`（允许） |
+| `override` | bool | 否 | 是否覆盖已存在的分组（默认：false） |
+| `ipNets` | []string | 是 | IP地址或CIDR网段列表 |
+
+#### 使用场景
+
+- **预配置封禁列表**: 自动创建包含已知恶意IP的分组
+- **白名单配置**: 预配置可信IP地址
+- **测试环境**: 在开发或测试环境中快速设置测试数据
+- **生产环境**: 根据安全策略预配置必要的IP规则
 
 ### 常用命令行参数
 
@@ -128,6 +170,7 @@ database:
 | `--listen` | `-l` | Web服务监听地址 | 0.0.0.0:8080 |
 | `--db-driver` | - | 数据库驱动 (sqlite\|mysql\|postgres) | sqlite |
 | `--db-name` | - | 数据库名称或文件路径 | netbouncer.db |
+| `--db-log-level` | - | SQL日志级别 (silent\|error\|warn\|info) | info |
 
 ## 🌐 Web界面使用
 
@@ -275,30 +318,4 @@ make build-web
 - `GET /api/ip` - 获取IP列表
 - `POST /api/ip` - 创建IP规则
 - `GET /api/group` - 获取组列表
-- `POST /api/group` - 创建组
-
-## 🔒 安全注意事项
-
-- 使用iptables或ipset需要root权限
-- 生产环境建议使用数据库存储
-- 定期备份配置文件和数据
-- 不要将包含敏感信息的配置文件提交到版本控制
-
-## 🤝 贡献
-
-欢迎提交Issue和Pull Request！
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 📞 支持
-
-- 查看 [Issues](https://github.com/graydovee/netbouncer/issues)
-- 创建新的 Issue
-- 查看 [CONFIGURATION.md](CONFIGURATION.md) 了解详细配置
-- 查看 [API.md](API.md) 了解API接口
-
----
-
-**NetBouncer** - 让网络监控变得简单高效 🚀 
+- `POST /api/group`

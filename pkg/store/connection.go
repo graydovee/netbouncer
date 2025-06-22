@@ -62,18 +62,20 @@ func (l *SlogLogger) Error(ctx context.Context, msg string, data ...any) {
 
 // Trace 记录SQL跟踪日志
 func (l *SlogLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
-	if l.level <= slog.LevelInfo {
-		elapsed := time.Since(begin)
-		sql, rows := fc()
+	elapsed := time.Since(begin)
+	sql, rows := fc()
 
-		attrs := []any{
-			"elapsed", elapsed,
-			"rows", rows,
-		}
+	attrs := []any{
+		"elapsed", elapsed,
+		"rows", rows,
+	}
 
-		if err != nil {
+	if err != nil {
+		if l.level <= slog.LevelError {
 			slog.Error("SQL执行错误", append(attrs, "error", err, "sql", sql)...)
-		} else {
+		}
+	} else {
+		if l.level <= slog.LevelInfo {
 			slog.Info("SQL执行", append(attrs, "sql", sql)...)
 		}
 	}
@@ -121,9 +123,24 @@ func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)
 	}
 
+	// 根据配置设置SQL日志级别
+	var logLevel slog.Level
+	switch cfg.LogLevel {
+	case "silent":
+		logLevel = slog.LevelError
+	case "error":
+		logLevel = slog.LevelError
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "info":
+		logLevel = slog.LevelInfo
+	default:
+		logLevel = slog.LevelInfo // 默认级别
+	}
+
 	// 配置GORM，使用自定义的slog logger
 	gormConfig := &gorm.Config{
-		Logger: NewSlogLogger(slog.LevelInfo),
+		Logger: NewSlogLogger(logLevel),
 	}
 
 	db, err := gorm.Open(dialector, gormConfig)
@@ -141,6 +158,6 @@ func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	slog.Info("数据库连接成功", "driver", cfg.Driver)
+	slog.Info("数据库连接成功", "driver", cfg.Driver, "log_level", cfg.LogLevel)
 	return db, nil
 }

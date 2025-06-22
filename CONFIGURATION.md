@@ -72,7 +72,57 @@ database:
   password: ""            # 数据库密码
   database: "netbouncer.db"  # 数据库名称或文件路径
   dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
+  log_level: "info"       # SQL日志级别: "silent", "error", "warn", "info"
 ```
+
+### 初始规则配置 (rules)
+
+`rules` 配置项用于在应用启动时自动创建默认的IP分组和规则。这对于预配置常用的封禁列表、白名单等非常有用。
+
+```yaml
+rules:
+  # 创建一个默认的封禁组
+  - group: "blocked"
+    groupDescription: "默认封禁组"
+    action: "block"
+    override: false
+    ipNets:
+      - "192.168.1.100"
+      - "10.0.0.0/24"
+  
+  # 创建一个白名单组
+  - group: "whitelist"
+    groupDescription: "白名单组"
+    action: "allow"
+    override: true
+    ipNets:
+      - "127.0.0.1"
+      - "192.168.1.1"
+```
+
+#### 规则配置字段说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group` | string | 是 | 分组名称，用于标识该规则组 |
+| `groupDescription` | string | 否 | 分组描述，用于说明该组的用途 |
+| `action` | string | 是 | 动作类型：`block`（封禁）或 `allow`（允许） |
+| `override` | bool | 否 | 是否覆盖已存在的分组，默认为 `false` |
+| `ipNets` | []string | 是 | IP地址或CIDR网段列表 |
+
+#### 规则配置使用场景
+
+1. **预配置封禁列表**: 在启动时自动创建包含已知恶意IP的分组
+2. **白名单配置**: 预配置可信IP地址，确保关键服务不受影响
+3. **测试环境**: 在开发或测试环境中快速设置测试数据
+4. **生产环境**: 根据安全策略预配置必要的IP规则
+
+#### 规则配置注意事项
+
+- 如果 `override` 为 `false` 且分组已存在，则不会覆盖现有分组
+- 如果 `override` 为 `true`，则会删除现有分组并重新创建
+- `ipNets` 支持单个IP地址（如 `192.168.1.100`）和CIDR网段（如 `10.0.0.0/24`）
+- 规则配置在应用启动时执行，如果配置有误可能导致启动失败
 
 ## 命令行参数
 
@@ -106,6 +156,7 @@ database:
 - `--db-password`: 数据库密码
 - `--db-name`: 数据库名称或文件路径
 - `--db-dsn`: 数据库连接字符串
+- `--db-log-level`: SQL日志级别 (silent|error|warn|info)
 
 ## 使用示例
 

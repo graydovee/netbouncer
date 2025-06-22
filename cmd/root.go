@@ -62,6 +62,7 @@ func init() {
 	rootCmd.Flags().StringVar(&cfg.Database.Password, "db-password", cfg.Database.Password, "数据库密码")
 	rootCmd.Flags().StringVar(&cfg.Database.Database, "db-name", cfg.Database.Database, "数据库名称或文件路径")
 	rootCmd.Flags().StringVar(&cfg.Database.DSN, "db-dsn", cfg.Database.DSN, "数据库连接字符串")
+	rootCmd.Flags().StringVar(&cfg.Database.LogLevel, "db-log-level", cfg.Database.LogLevel, "SQL日志级别 (silent|error|warn|info)")
 
 	// 添加使用示例
 	rootCmd.Example = `  # 使用默认配置启动（ipset模式）
@@ -139,7 +140,7 @@ func run() error {
 	}
 
 	svc := service.NewNetService(mon, fw, store)
-	if err := svc.Init(); err != nil {
+	if err := svc.Init(cfg.Rules); err != nil {
 		return fmt.Errorf("初始化失败: %w", err)
 	}
 
