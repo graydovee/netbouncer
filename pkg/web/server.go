@@ -1,6 +1,7 @@
 package web
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 
@@ -37,6 +38,7 @@ func NewServer(netService *service.NetService) *Server {
 	e.GET("/api/ip", svr.handleListAllIpNets)
 	e.GET("/api/ip/:groupId", svr.handleListIpNetsByGroup)
 	e.POST("/api/ip", svr.handleCreateIpNet)
+	e.POST("/api/ip/import", svr.handleImportIpNet)
 	e.DELETE("/api/ip/:id", svr.handleDeleteIpNet)
 	e.GET("/api/ip/action", svr.handleListAllActions)
 	e.PUT("/api/ip/action", svr.handleUpdateIpNetAction)
@@ -90,6 +92,40 @@ func (s *Server) handleCreateIpNet(c echo.Context) error {
 		return c.JSON(http.StatusOK, Error(500, err.Error()))
 	}
 	return c.JSON(http.StatusOK, Success("已禁用"))
+}
+
+func (s *Server) handleImportIpNet(c echo.Context) error {
+	var r ImportIPNetRequest
+	if err := c.Bind(&r); err != nil {
+		return c.JSON(http.StatusOK, Error(400, "参数错误"))
+	}
+
+	text := r.Text
+	if r.Url != "" {
+		response, err := http.Get(r.Url)
+		if err != nil {
+			return c.JSON(http.StatusOK, Error(500, err.Error()))
+		}
+		defer response.Body.Close()
+
+		// 避免被攻击，最多只读取100M数据
+		body, err := io.ReadAll(io.LimitReader(response.Body, 100*1024*1024))
+		if err != nil {
+			return c.JSON(http.StatusOK, Error(500, err.Error()))
+		}
+
+		text = string(body)
+	}
+
+	successCount, errorCount, err := s.netService.ImportIpNet(text, r.GroupId, r.Action)
+	if err != nil {
+		return c.JSON(http.StatusOK, Error(500, err.Error()))
+	}
+
+	return c.JSON(http.StatusOK, Success(ImportIPNetResponse{
+		SuccessCount: successCount,
+		FailedCount:  errorCount,
+	}))
 }
 
 func (s *Server) handleListAllActions(c echo.Context) error {
