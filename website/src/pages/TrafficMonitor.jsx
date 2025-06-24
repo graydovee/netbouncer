@@ -16,6 +16,11 @@ import {
   Tooltip,
   Alert,
   CircularProgress,
+  TablePagination,
+  Grid,
+  FormControl,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -23,6 +28,7 @@ import {
   Stop as StopIcon,
   ArrowUpward as ArrowUpIcon,
   ArrowDownward as ArrowDownIcon,
+  FilterList as FilterIcon,
 } from '@mui/icons-material';
 import { useMessageSnackbar, MessageSnackbar } from '../components/MessageSnackbar';
 
@@ -99,6 +105,16 @@ function TrafficMonitor() {
   const [refreshTimer, setRefreshTimer] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   
+  // 分页相关状态
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [customRowsPerPage, setCustomRowsPerPage] = useState(25);
+  
+  // 过滤相关状态
+  const [filterRemoteIP, setFilterRemoteIP] = useState('');
+  const [filterLocalIP, setFilterLocalIP] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  
   // 使用消息提示Hook
   const { snackbar, showMessage, hideMessage } = useMessageSnackbar();
 
@@ -153,8 +169,68 @@ function TrafficMonitor() {
     }
   };
 
+  // 分页处理函数
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event) => {
+    const newRowsPerPage = parseInt(event.target.value, 10);
+    if (newRowsPerPage > 0) {
+      setRowsPerPage(newRowsPerPage);
+      setCustomRowsPerPage(newRowsPerPage);
+      setPage(0);
+    }
+  };
+
+  // 自定义分页数量处理
+  const handleCustomRowsPerPageChange = (event) => {
+    const value = parseInt(event.target.value, 10);
+    setCustomRowsPerPage(value);
+  };
+
+  // 自定义分页数量失去焦点时生效
+  const handleCustomRowsPerPageBlur = () => {
+    const value = customRowsPerPage;
+    if (value > 0 && value <= 10000) {
+      setRowsPerPage(value);
+      setPage(0);
+    } else {
+      // 如果输入的值无效，重置为当前有效的分页数量
+      setCustomRowsPerPage(rowsPerPage);
+    }
+  };
+
+  // 自定义分页数量回车键处理
+  const handleCustomRowsPerPageKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      event.target.blur(); // 触发失去焦点事件
+    }
+  };
+
+  // 过滤数据
+  const getFilteredData = () => {
+    let filtered = [...trafficData];
+    
+    // 按远程IP过滤
+    if (filterRemoteIP) {
+      filtered = filtered.filter(item => 
+        item.remote_ip.toLowerCase().includes(filterRemoteIP.toLowerCase())
+      );
+    }
+    
+    // 按本地IP过滤
+    if (filterLocalIP) {
+      filtered = filtered.filter(item => 
+        item.local_ip.toLowerCase().includes(filterLocalIP.toLowerCase())
+      );
+    }
+    
+    return filtered;
+  };
+
   // 排序数据
-  const sortedData = [...trafficData].sort((a, b) => {
+  const sortedData = getFilteredData().sort((a, b) => {
     let v1 = a[sortKey], v2 = b[sortKey];
     if (typeof v1 === 'string') {
       return sortAsc ? v1.localeCompare(v2) : v2.localeCompare(v1);
@@ -162,6 +238,25 @@ function TrafficMonitor() {
       return sortAsc ? v1 - v2 : v2 - v1;
     }
   });
+
+  // 获取当前页的数据
+  const getCurrentPageData = () => {
+    const startIndex = page * rowsPerPage;
+    const endIndex = startIndex + rowsPerPage;
+    return sortedData.slice(startIndex, endIndex);
+  };
+
+  // 清除过滤条件
+  const clearFilters = () => {
+    setFilterRemoteIP('');
+    setFilterLocalIP('');
+    setPage(0);
+  };
+
+  // 获取过滤后的数据总数
+  const getFilteredDataCount = () => {
+    return getFilteredData().length;
+  };
 
   // 处理排序
   const handleSort = (key) => {
@@ -284,6 +379,103 @@ function TrafficMonitor() {
               最后更新: {lastUpdate.toLocaleString('zh-CN')}
             </Typography>
           )}
+          <Typography variant="body2" color="text.secondary">
+            共 {getFilteredDataCount()} 条记录
+            {getFilteredDataCount() > 0 && (
+              <span>，当前页 {page + 1}/{Math.ceil(getFilteredDataCount() / rowsPerPage)}</span>
+            )}
+            {(filterRemoteIP || filterLocalIP) && (
+              <span>（已过滤）</span>
+            )}
+          </Typography>
+        </Box>
+
+        {/* 过滤面板 */}
+        <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Button
+            variant="outlined"
+            onClick={() => setShowFilters(!showFilters)}
+            startIcon={<FilterIcon />}
+            color={showFilters ? 'primary' : 'default'}
+            size="small"
+          >
+            过滤
+          </Button>
+          {(filterRemoteIP || filterLocalIP) && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={clearFilters}
+            >
+              清除过滤
+            </Button>
+          )}
+        </Box>
+
+        {showFilters && (
+          <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              过滤条件
+            </Typography>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="远程地址"
+                  placeholder="例如：192.168, 10.0"
+                  value={filterRemoteIP}
+                  onChange={(e) => {
+                    setFilterRemoteIP(e.target.value);
+                    setPage(0);
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="本地地址"
+                  placeholder="例如：192.168, 10.0"
+                  value={filterLocalIP}
+                  onChange={(e) => {
+                    setFilterLocalIP(e.target.value);
+                    setPage(0);
+                  }}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+
+        {/* 分页设置 */}
+        <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Typography variant="body2" color="text.secondary">
+            每页显示：
+          </Typography>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <Select
+              value={rowsPerPage}
+              onChange={handleChangeRowsPerPage}
+              displayEmpty
+            >
+              <MenuItem value={10}>10 条</MenuItem>
+              <MenuItem value={25}>25 条</MenuItem>
+              <MenuItem value={50}>50 条</MenuItem>
+              <MenuItem value={100}>100 条</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField
+            size="small"
+            type="number"
+            label="自定义数量"
+            value={customRowsPerPage}
+            onChange={handleCustomRowsPerPageChange}
+            onBlur={handleCustomRowsPerPageBlur}
+            onKeyDown={handleCustomRowsPerPageKeyDown}
+            inputProps={{ min: 1, max: 10000 }}
+            sx={{ width: 120 }}
+          />
         </Box>
       </Paper>
 
@@ -323,14 +515,14 @@ function TrafficMonitor() {
                     <Typography sx={{ ml: 1 }}>加载中...</Typography>
                   </TableCell>
                 </TableRow>
-              ) : sortedData.length === 0 ? (
+              ) : getCurrentPageData().length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={columns.length} align="center">
                     暂无数据
                   </TableCell>
                 </TableRow>
               ) : (
-                sortedData.map((row, index) => (
+                getCurrentPageData().map((row, index) => (
                   <TableRow key={index} hover>
                     <TableCell sx={{ fontFamily: 'monospace' }}>{row.remote_ip}</TableCell>
                     <TableCell sx={{ fontFamily: 'monospace' }}>{row.local_ip}</TableCell>
@@ -380,6 +572,21 @@ function TrafficMonitor() {
             </TableBody>
           </Table>
         </TableContainer>
+        
+        {/* 分页组件 */}
+        <TablePagination
+          component="div"
+          count={getFilteredDataCount()}
+          page={page}
+          onPageChange={handleChangePage}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+          rowsPerPageOptions={[10, 25, 50, 100, customRowsPerPage].filter((value, index, self) => self.indexOf(value) === index).sort((a, b) => a - b)}
+          labelRowsPerPage="每页显示:"
+          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
+          showFirstButton
+          showLastButton
+        />
       </Paper>
       <MessageSnackbar snackbar={snackbar} onClose={hideMessage} />
     </Box>

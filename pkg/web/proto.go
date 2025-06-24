@@ -41,6 +41,19 @@ type CreateIPNetRequest struct {
 	Action  string `json:"action"`
 }
 
+type ImportIPNetRequest struct {
+	Text string `json:"text"`
+	Url  string `json:"url"`
+
+	GroupId uint   `json:"group_id"`
+	Action  string `json:"action"`
+}
+
+type ImportIPNetResponse struct {
+	SuccessCount int `json:"success_count"`
+	FailedCount  int `json:"failed_count"`
+}
+
 // UpdateIPNetGroupRequest 修改IP所属组请求
 type UpdateIPNetGroupRequest struct {
 	ID      uint `json:"id"`

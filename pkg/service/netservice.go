@@ -426,3 +426,23 @@ func (s *NetService) UpdateIPGroup(id uint, groupId uint) error {
 
 	return nil
 }
+
+func (s *NetService) ImportIpNet(text string, groupId uint, action string) (int, int, error) {
+	ipnets := extractIPsAndCIDRs(text)
+
+	successCount := 0
+	errorCount := 0
+
+	for _, match := range ipnets {
+		err := s.CreateIpNet(match, groupId, action)
+		if err != nil {
+			errorCount++
+			slog.Error("导入地址失败", "ipnet", match, "error", err)
+		} else {
+			successCount++
+			slog.Info("导入地址成功", "ipnet", match)
+		}
+	}
+
+	return successCount, errorCount, nil
+}

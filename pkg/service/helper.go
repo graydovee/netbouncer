@@ -2,6 +2,7 @@ package service
 
 import (
 	"net"
+	"regexp"
 	"time"
 
 	"github.com/graydovee/netbouncer/pkg/store"
@@ -70,4 +71,16 @@ func IsBanned(bannedIpNets, allowIpNets []*net.IPNet, ip string) bool {
 	}
 
 	return false
+}
+
+var ipOrCidrRex = regexp.MustCompile(`(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\/(?:[0-9]|[12][0-9]|3[0-2]))?\b`)
+
+func extractIPsAndCIDRs(text string) []string {
+	// 正则表达式说明：
+	// 1. \b 匹配单词边界，确保匹配独立的IP或CIDR
+	// 2. IP部分：(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])
+	//    - 匹配 0-255 的数字，禁止前导零
+	// 3. CIDR部分：(?:\/(?:[0-9]|[12][0-9]|3[0-2]))?
+	//    - 可选的后缀，匹配 /0 到 /32
+	return ipOrCidrRex.FindAllString(text, -1)
 }
