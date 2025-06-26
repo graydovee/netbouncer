@@ -123,3 +123,78 @@ func (s *IpNetStore) UpdateGroupIDByIPNet(ipnet string, groupID uint) error {
 func (s *IpNetStore) RemoveFromGroup(ipnet string) error {
 	return s.db.Model(&IpNet{}).Where("ip_net = ?", ipnet).Update("group_id", nil).Error
 }
+
+// BatchCreate 批量创建IP网络记录，使用事务确保整体成功或失败
+func (s *IpNetStore) BatchCreate(ipnets []string, groupID uint, action string) ([]IpNet, error) {
+	var allModels []IpNet
+	now := time.Now()
+
+	// 分批处理，每批最多1000条记录
+	batchSize := 1000
+	totalBatches := (len(ipnets) + batchSize - 1) / batchSize
+
+	// 使用事务进行批量插入
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		for i := 0; i < totalBatches; i++ {
+			start := i * batchSize
+			end := start + batchSize
+			if end > len(ipnets) {
+				end = len(ipnets)
+			}
+
+			batchIpnets := ipnets[start:end]
+			var batchModels []IpNet
+
+			for _, ipnet := range batchIpnets {
+				batchModels = append(batchModels, IpNet{
+					IpNet:     ipnet,
+					CreatedAt: now,
+					UpdatedAt: now,
+					GroupID:   groupID,
+					Action:    action,
+				})
+			}
+
+			if err := tx.Create(&batchModels).Error; err != nil {
+				return err
+			}
+
+			allModels = append(allModels, batchModels...)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return allModels, nil
+}
+
+// FindByIpNets 根据IP网络地址列表查找已存在的记录
+func (s *IpNetStore) FindByIpNets(ipnets []string) ([]IpNet, error) {
+	var allModels []IpNet
+
+	// 分批查询，每批最多1000条记录
+	batchSize := 1000
+	totalBatches := (len(ipnets) + batchSize - 1) / batchSize
+
+	for i := 0; i < totalBatches; i++ {
+		start := i * batchSize
+		end := start + batchSize
+		if end > len(ipnets) {
+			end = len(ipnets)
+		}
+
+		batchIpnets := ipnets[start:end]
+		var batchModels []IpNet
+
+		if err := s.db.Where("ip_net IN ?", batchIpnets).Find(&batchModels).Error; err != nil {
+			return nil, err
+		}
+
+		allModels = append(allModels, batchModels...)
+	}
+
+	return allModels, nil
+}

@@ -431,20 +431,92 @@ func (s *NetService) UpdateIPGroup(id uint, groupId uint) error {
 
 func (s *NetService) ImportIpNet(text string, groupId uint, action string) (int, int, error) {
 	ipnets := extractIPsAndCIDRs(text)
+	slog.Info("导入地址", "count", len(ipnets))
+	if len(ipnets) == 0 {
+		return 0, 0, nil
+	}
+
+	// 检查指定的组是否存在
+	group, err := s.store.IpNetGroupStore.FindByID(groupId)
+	if err != nil || group == nil {
+		return 0, 0, fmt.Errorf("指定的组不存在: %w", err)
+	}
+
+	// 查找已存在的IP网络记录
+	slog.Info("查询已存在的IP网络记录")
+	existingIpNets, err := s.store.IpNetStore.FindByIpNets(ipnets)
+	if err != nil {
+		return 0, 0, fmt.Errorf("查询已存在的IP网络失败: %w", err)
+	}
+
+	// 构建已存在IP的映射，用于快速查找
+	existingMap := make(map[string]*store.IpNet)
+	for i := range existingIpNets {
+		existingMap[existingIpNets[i].IpNet] = &existingIpNets[i]
+	}
+
+	// 分离需要更新action的IP和需要新增的IP
+	var toUpdate []*store.IpNet
+	var toCreate []string
+
+	for _, ipnet := range ipnets {
+		if existing, exists := existingMap[ipnet]; exists {
+			// 如果action不一致，需要更新
+			if existing.Action != action {
+				toUpdate = append(toUpdate, existing)
+			}
+			// 如果action一致，跳过
+		} else {
+			// 不存在，需要新增
+			toCreate = append(toCreate, ipnet)
+		}
+	}
+
+	slog.Info("导入地址分类", "to_update", len(toUpdate), "to_create", len(toCreate))
 
 	successCount := 0
 	errorCount := 0
 
-	for _, match := range ipnets {
-		err := s.CreateOrUpdateIpNet(match, groupId, action)
-		if err != nil {
-			errorCount++
-			slog.Error("导入地址失败", "ipnet", match, "error", err)
-		} else {
-			successCount++
-			slog.Info("导入地址成功", "ipnet", match)
+	// 1. 批量更新已存在但action不一致的IP
+	if len(toUpdate) > 0 {
+		slog.Info("开始更新已存在的IP网络action")
+		for _, ipNet := range toUpdate {
+			err := s.UpdateIpNetAction(ipNet.ID, action)
+			if err != nil {
+				errorCount++
+				slog.Error("更新IP网络action失败", "ipnet", ipNet.IpNet, "error", err)
+			} else {
+				successCount++
+				slog.Info("更新IP网络action成功", "ipnet", ipNet.IpNet, "action", action)
+			}
 		}
 	}
 
+	// 2. 批量插入新的IP网络记录
+	if len(toCreate) > 0 {
+		slog.Info("开始批量创建新的IP网络记录", "count", len(toCreate))
+		newIpNets, err := s.store.IpNetStore.BatchCreate(toCreate, groupId, action)
+		if err != nil {
+			errorCount += len(toCreate)
+			slog.Error("批量创建IP网络失败", "error", err)
+		} else {
+			successCount += len(newIpNets)
+			slog.Info("批量创建IP网络成功", "count", len(newIpNets))
+
+			// 3. 批量应用防火墙规则
+			slog.Info("开始应用防火墙规则", "count", len(newIpNets))
+			for _, ipNet := range newIpNets {
+				err := s.applyAction(&ipNet)
+				if err != nil {
+					slog.Error("应用防火墙规则失败", "ipnet", ipNet.IpNet, "error", err)
+					// 注意：这里不增加errorCount，因为数据库插入已经成功
+				} else {
+					slog.Info("应用防火墙规则成功", "ipnet", ipNet.IpNet, "action", action)
+				}
+			}
+		}
+	}
+
+	slog.Info("导入完成", "success", successCount, "error", errorCount)
 	return successCount, errorCount, nil
 }
