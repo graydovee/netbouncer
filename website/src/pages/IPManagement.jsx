@@ -64,15 +64,7 @@ function IPManagement() {
   const [loading, setLoading] = useState(false);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [newIP, setNewIP] = useState('');
-  const [selectedGroupId, setSelectedGroupId] = useState('');
-  const [selectedAction, setSelectedAction] = useState('ban');
-  const [createLoading, setCreateLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0); // 0: 全部, 1+: 按组过滤
-  const [editGroupId, setEditGroupId] = useState('');
-  const [editGroupName, setEditGroupName] = useState('');
-  const [editGroupDescription, setEditGroupDescription] = useState('');
-  const [editGroupLoading, setEditGroupLoading] = useState(false);
   const [changeGroupDialog, setChangeGroupDialog] = useState(false);
   const [selectedIP, setSelectedIP] = useState('');
   const [selectedIPData, setSelectedIPData] = useState(null);
@@ -92,8 +84,8 @@ function IPManagement() {
   const [batchGroupId, setBatchGroupId] = useState('');
   const [batchLoading, setBatchLoading] = useState(false);
   
-  // 批量导入相关状态
-  const [batchImportDialog, setBatchImportDialog] = useState(false);
+  // 导入规则相关状态
+  const [importDialog, setImportDialog] = useState(false);
   const [importText, setImportText] = useState('');
   const [importUrl, setImportUrl] = useState('');
   const [importAction, setImportAction] = useState('ban');
@@ -122,9 +114,9 @@ function IPManagement() {
       const result = await response.json();
       if (result.code === 200) {
         setGroups(result.data || []);
-        // 如果有组，设置第一个为默认选择
-        if (result.data && result.data.length > 0 && !selectedGroupId) {
-          setSelectedGroupId(result.data[0].id);
+        // 如果有组，设置第一个为默认导入组
+        if (result.data && result.data.length > 0 && !importGroupId) {
+          setImportGroupId(result.data[0].id);
         }
       } else {
         console.error('获取组列表失败:', result.message);
@@ -193,76 +185,6 @@ function IPManagement() {
     }
   };
 
-  // 验证IP或CIDR格式
-  const validateIPOrCIDR = (input) => {
-    // 简单的IP或CIDR验证
-    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
-    
-    if (ipRegex.test(input)) {
-      // 验证IP地址的每个段是否在0-255范围内
-      const parts = input.split('.');
-      return parts.every(part => parseInt(part) >= 0 && parseInt(part) <= 255);
-    } else if (cidrRegex.test(input)) {
-      // 验证CIDR格式
-      const [ip, prefix] = input.split('/');
-      const prefixNum = parseInt(prefix);
-      if (prefixNum < 0 || prefixNum > 32) return false;
-      
-      const parts = ip.split('.');
-      return parts.every(part => parseInt(part) >= 0 && parseInt(part) <= 255);
-    }
-    return false;
-  };
-
-  // 创建IP或CIDR
-  const createIPOrCIDR = async () => {
-    if (!newIP.trim()) {
-      showMessage('请输入IP地址或CIDR', 'warning');
-      return;
-    }
-
-    if (!validateIPOrCIDR(newIP.trim())) {
-      showMessage('请输入有效的IP地址或CIDR格式（例如：192.168.1.1 或 192.168.1.0/24）', 'error');
-      return;
-    }
-
-    if (!selectedGroupId) {
-      showMessage('请选择要添加到的组', 'warning');
-      return;
-    }
-
-    setCreateLoading(true);
-    try {
-      const response = await fetch('/api/ip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          ip_net: newIP.trim(),
-          group_id: parseInt(selectedGroupId),
-          action: selectedAction
-        })
-      });
-      const result = await response.json();
-      if (result.code === 200) {
-        // 创建成功后重新获取列表
-        if (selectedTab === 0) {
-          await fetchIpNets();
-        } else {
-          await fetchIpNetsByGroup(selectedGroupId);
-        }
-        setNewIP(''); // 清空输入框
-        showMessage(`成功创建 ${newIP.trim()}`);
-      } else {
-        showMessage('创建失败: ' + result.message, 'error');
-      }
-    } catch (error) {
-      showMessage('创建失败: 网络错误', 'error');
-    } finally {
-      setCreateLoading(false);
-    }
-  };
-
   // 删除IP
   const deleteIP = async (ipId) => {
     try {
@@ -280,13 +202,6 @@ function IPManagement() {
       }
     } catch (error) {
       showMessage('删除失败: 网络错误', 'error');
-    }
-  };
-
-  // 处理回车键
-  const handleKeyDown = (event) => {
-    if (event.key === 'Enter') {
-      createIPOrCIDR();
     }
   };
 
@@ -427,48 +342,6 @@ function IPManagement() {
   // 构建标签页
   const tabLabels = ['全部', ...groups.map(group => group.name)];
 
-  // 打开编辑组对话框
-  const openEditGroupDialog = (groupId, groupName, groupDescription) => {
-    setEditGroupId(groupId);
-    setEditGroupName(groupName);
-    setEditGroupDescription(groupDescription);
-  };
-
-  // 保存组信息
-  const saveGroup = async () => {
-    setEditGroupLoading(true);
-    try {
-      const response = await fetch('/api/group', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          id: editGroupId,
-          name: editGroupName,
-          description: editGroupDescription
-        })
-      });
-      const result = await response.json();
-      if (result.code === 200) {
-        // 更新组列表
-        setGroups(prevGroups => prevGroups.map(group =>
-          group.id === editGroupId ? { ...group, name: editGroupName, description: editGroupDescription } : group
-        ));
-        // 如果当前选择的组是编辑的组，重新获取列表
-        if (selectedGroupId === editGroupId) {
-          await fetchIpNetsByGroup(editGroupId);
-        }
-        setEditGroupId(''); // 关闭对话框
-        showMessage('组信息保存成功');
-      } else {
-        showMessage('组信息保存失败: ' + result.message, 'error');
-      }
-    } catch (error) {
-      showMessage('组信息保存失败: 网络错误', 'error');
-    } finally {
-      setEditGroupLoading(false);
-    }
-  };
-
   // 打开修改IP所属组对话框
   const openChangeGroupDialog = (ipData) => {
     setSelectedIP(ipData.ip_net);
@@ -500,7 +373,10 @@ function IPManagement() {
         if (selectedTab === 0) {
           await fetchIpNets();
         } else {
-          await fetchIpNetsByGroup(selectedGroupId);
+          const groupId = groups[selectedTab - 1]?.id;
+          if (groupId) {
+            await fetchIpNetsByGroup(groupId);
+          }
         }
         setChangeGroupDialog(false);
         showMessage(`成功修改 ${selectedIP} 的所属组`);
@@ -545,7 +421,10 @@ function IPManagement() {
         if (selectedTab === 0) {
           await fetchIpNets();
         } else {
-          await fetchIpNetsByGroup(selectedGroupId);
+          const groupId = groups[selectedTab - 1]?.id;
+          if (groupId) {
+            await fetchIpNetsByGroup(groupId);
+          }
         }
         setChangeActionDialog(false);
         showMessage(`成功修改 ${selectedIP} 的行为为 ${newAction}`);
@@ -640,7 +519,10 @@ function IPManagement() {
     if (selectedTab === 0) {
       await fetchIpNets();
     } else {
-      await fetchIpNetsByGroup(selectedGroupId);
+      const groupId = groups[selectedTab - 1]?.id;
+      if (groupId) {
+        await fetchIpNetsByGroup(groupId);
+      }
     }
   };
 
@@ -690,7 +572,10 @@ function IPManagement() {
     if (selectedTab === 0) {
       await fetchIpNets();
     } else {
-      await fetchIpNetsByGroup(selectedGroupId);
+      const groupId = groups[selectedTab - 1]?.id;
+      if (groupId) {
+        await fetchIpNetsByGroup(groupId);
+      }
     }
   };
 
@@ -748,12 +633,15 @@ function IPManagement() {
     if (selectedTab === 0) {
       await fetchIpNets();
     } else {
-      await fetchIpNetsByGroup(selectedGroupId);
+      const groupId = groups[selectedTab - 1]?.id;
+      if (groupId) {
+        await fetchIpNetsByGroup(groupId);
+      }
     }
   };
 
-  // 批量导入IP
-  const handleBatchImport = async () => {
+  // 导入规则
+  const handleImport = async () => {
     if (!importText.trim() && !importUrl.trim()) {
       showMessage('请输入要导入的IP或CIDR或URL', 'warning');
       return;
@@ -806,7 +694,10 @@ function IPManagement() {
         if (selectedTab === 0) {
           await fetchIpNets();
         } else {
-          await fetchIpNetsByGroup(selectedGroupId);
+          const groupId = groups[selectedTab - 1]?.id;
+          if (groupId) {
+            await fetchIpNetsByGroup(groupId);
+          }
         }
       } else {
         showMessage('导入失败: ' + result.message, 'error');
@@ -815,7 +706,7 @@ function IPManagement() {
       showMessage('导入失败: 网络错误', 'error');
     } finally {
       setImportLoading(false);
-      setBatchImportDialog(false);
+      setImportDialog(false);
       setImportText('');
       setImportUrl('');
     }
@@ -833,142 +724,133 @@ function IPManagement() {
         </Alert>
       )}
 
-      {/* 创建IP操作栏 */}
       <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          创建IP或CIDR
-        </Typography>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={3} md={2}>
-            <TextField
-              fullWidth
-              label="IP地址或CIDR"
-              placeholder="例如10.0.0.1或10.0.0.0/8"
-              value={newIP}
-              onChange={(e) => setNewIP(e.target.value)}
-              onKeyDown={handleKeyDown}
-              size="small"
-              disabled={createLoading}
-            />
-          </Grid>
-          <Grid item xs={12} sm={3} md={2}>
-            <FormControl fullWidth size="small" disabled={createLoading || groupsLoading}>
-              <InputLabel>选择组</InputLabel>
-              <Select
-                value={selectedGroupId}
-                label="选择组"
-                onChange={(e) => setSelectedGroupId(e.target.value)}
-              >
-                {groups.map((group) => (
-                  <MenuItem key={group.id} value={group.id}>
-                    {group.name}
-                    {group.description && (
-                      <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                        ({group.description})
-                      </Typography>
-                    )}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={3} md={2}>
-            <FormControl fullWidth size="small" disabled={createLoading}>
-              <InputLabel>选择行为</InputLabel>
-              <Select
-                value={selectedAction}
-                label="选择行为"
-                onChange={(e) => setSelectedAction(e.target.value)}
-              >
-                {availableActions.map((action) => (
-                  <MenuItem key={action} value={action}>
-                    {getActionDisplayText(action)}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item>
-            <Button
-              variant="contained"
-              onClick={createIPOrCIDR}
-              startIcon={<AddIcon />}
-              disabled={createLoading || !newIP.trim() || !selectedGroupId}
-              color="primary"
-            >
-              {createLoading ? '创建中...' : '创建'}
-            </Button>
-          </Grid>
-        </Grid>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          支持单个IP地址（如：192.168.1.1）或CIDR网段（如：192.168.1.0/24）
-        </Typography>
-      </Paper>
-
-      {/* 组过滤标签页 */}
-      <Paper sx={{ mb: 2 }}>
-        <Tabs 
-          value={selectedTab} 
-          onChange={handleTabChange}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
-        >
-          {tabLabels.map((label, index) => (
-            <Tab 
-              key={index} 
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  {label}
-                  {index > 0 && (
-                    <Chip 
-                      label={ipNets.filter(ip => ip.group?.id === groups[index - 1]?.id).length}
-                      size="small"
-                      color="primary"
-                      variant="outlined"
-                    />
-                  )}
-                </Box>
-              }
-            />
-          ))}
-        </Tabs>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Button
+            variant="contained"
+            onClick={() => setImportDialog(true)}
+            startIcon={<AddIcon />}
+            disabled={importLoading || groupsLoading}
+            color="primary"
+          >
+            导入规则
+          </Button>
+          <Typography variant="body2" color="text.secondary">
+            支持IP地址、CIDR网段通过文本批量导入或URL导入
+          </Typography>
+        </Box>
       </Paper>
 
       {/* 操作栏 */}
       <Paper sx={{ p: 2, mb: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Button
-            variant="outlined"
-            onClick={() => {
-              if (selectedTab === 0) {
-                fetchIpNets();
-              } else {
-                const groupId = groups[selectedTab - 1]?.id;
-                if (groupId) {
-                  fetchIpNetsByGroup(groupId);
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <Button
+              variant="outlined"
+              onClick={() => {
+                if (selectedTab === 0) {
+                  fetchIpNets();
+                } else {
+                  const groupId = groups[selectedTab - 1]?.id;
+                  if (groupId) {
+                    fetchIpNetsByGroup(groupId);
+                  }
                 }
-              }
-            }}
-            startIcon={<RefreshIcon />}
-            disabled={loading}
-          >
-            刷新列表
-          </Button>
-          
-          {/* 过滤按钮 */}
-          <Button
-            variant="outlined"
-            onClick={() => setShowFilters(!showFilters)}
-            startIcon={<FilterIcon />}
-            color={showFilters ? 'primary' : 'default'}
-          >
-            过滤
-          </Button>
+              }}
+              startIcon={<RefreshIcon />}
+              disabled={loading}
+            >
+              刷新列表
+            </Button>
+            
+            {/* 过滤按钮 */}
+            <Button
+              variant="outlined"
+              onClick={() => setShowFilters(!showFilters)}
+              startIcon={<FilterIcon />}
+              color={showFilters ? 'primary' : 'default'}
+            >
+              过滤
+            </Button>
+            
+            <Typography variant="body2" color="text.secondary">
+              共 {getFilteredDataCount()} 个IP
+              {selectedTab > 0 && groups[selectedTab - 1] && (
+                <span>（组：{groups[selectedTab - 1].name}）</span>
+              )}
+              {selectedIPs.size > 0 && (
+                <span>，已选择 {selectedIPs.size} 个</span>
+              )}
+              {getFilteredDataCount() > 0 && (
+                <span>，当前页 {page + 1}/{Math.ceil(getFilteredDataCount() / rowsPerPage)}</span>
+              )}
+              {(filterAction || filterAddress) && (
+                <span>（已过滤）</span>
+              )}
+            </Typography>
+          </Box>
+
+          {/* 过滤面板 */}
+          {showFilters && (
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                过滤条件
+              </Typography>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} sm={5}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel shrink={true}>行为</InputLabel>
+                    <Select
+                      value={filterAction}
+                      label="行为"
+                      onChange={(e) => {
+                        setFilterAction(e.target.value);
+                        setPage(0);
+                      }}
+                      displayEmpty
+                    >
+                      <MenuItem value="">全部</MenuItem>
+                      {availableActions.map((action) => (
+                        <MenuItem key={action} value={action}>
+                          {getActionDisplayText(action)}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="地址"
+                    placeholder="例如：192.168, 10.0"
+                    value={filterAddress}
+                    onChange={(e) => {
+                      setFilterAddress(e.target.value);
+                      setPage(0);
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={clearFilters}
+                    disabled={!filterAction && !filterAddress}
+                  >
+                    清除
+                  </Button>
+                </Grid>
+              </Grid>
+            </Box>
+          )}
           
           {/* 批量操作按钮 */}
           {selectedIPs.size > 0 && (
-            <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', pt: 1, borderTop: 1, borderColor: 'divider' }}>
+              <Typography variant="subtitle2" color="primary">
+                批量操作：
+              </Typography>
               <Button
                 variant="outlined"
                 color="error"
@@ -1005,121 +887,39 @@ function IPManagement() {
               >
                 清除选择
               </Button>
-            </>
+            </Box>
           )}
-          
-          {/* 批量导入按钮 */}
-          <Button
-            variant="outlined"
-            color="primary"
-            startIcon={<AddIcon />}
-            onClick={() => setBatchImportDialog(true)}
-            disabled={batchLoading || importLoading}
-          >
-            批量导入
-          </Button>
-          
-          <Typography variant="body2" color="text.secondary">
-            共 {getFilteredDataCount()} 个IP
-            {selectedTab > 0 && groups[selectedTab - 1] && (
-              <span>（组：{groups[selectedTab - 1].name}）</span>
-            )}
-            {selectedIPs.size > 0 && (
-              <span>，已选择 {selectedIPs.size} 个</span>
-            )}
-            {getFilteredDataCount() > 0 && (
-              <span>，当前页 {page + 1}/{Math.ceil(getFilteredDataCount() / rowsPerPage)}</span>
-            )}
-            {(filterAction || filterAddress) && (
-              <span>（已过滤）</span>
-            )}
-          </Typography>
         </Box>
+      </Paper>
 
-        {/* 过滤面板 */}
-        {showFilters && (
-          <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-            <Typography variant="subtitle2" gutterBottom>
-              过滤条件
-            </Typography>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={5}>
-                <FormControl fullWidth size="small">
-                  <InputLabel shrink={true}>行为</InputLabel>
-                  <Select
-                    value={filterAction}
-                    label="行为"
-                    onChange={(e) => {
-                      setFilterAction(e.target.value);
-                      setPage(0);
-                    }}
-                    displayEmpty
-                  >
-                    <MenuItem value="">全部</MenuItem>
-                    {availableActions.map((action) => (
-                      <MenuItem key={action} value={action}>
-                        {getActionDisplayText(action)}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="地址"
-                  placeholder="例如：192.168, 10.0"
-                  value={filterAddress}
-                  onChange={(e) => {
-                    setFilterAddress(e.target.value);
-                    setPage(0);
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={clearFilters}
-                  disabled={!filterAction && !filterAddress}
-                >
-                  清除
-                </Button>
-              </Grid>
-            </Grid>
-          </Box>
-        )}
-
-        {/* 分页设置 */}
-        <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Typography variant="body2" color="text.secondary">
-            每页显示：
-          </Typography>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <Select
-              value={rowsPerPage}
-              onChange={handleChangeRowsPerPage}
-              displayEmpty
-            >
-              <MenuItem value={10}>10 条</MenuItem>
-              <MenuItem value={25}>25 条</MenuItem>
-              <MenuItem value={50}>50 条</MenuItem>
-              <MenuItem value={100}>100 条</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            size="small"
-            type="number"
-            label="自定义数量"
-            value={customRowsPerPage}
-            onChange={handleCustomRowsPerPageChange}
-            onBlur={handleCustomRowsPerPageBlur}
-            onKeyDown={handleCustomRowsPerPageKeyDown}
-            inputProps={{ min: 1, max: 10000 }}
-            sx={{ width: 120 }}
-          />
-        </Box>
+      {/* 组过滤标签页 */}
+      <Paper sx={{ mb: 2 }}>
+        <Tabs 
+          value={selectedTab} 
+          onChange={handleTabChange}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          {tabLabels.map((label, index) => (
+            <Tab 
+              key={index} 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {label}
+                  {index > 0 && (
+                    <Chip 
+                      label={ipNets.filter(ip => ip.group?.id === groups[index - 1]?.id).length}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                    />
+                  )}
+                </Box>
+              }
+            />
+          ))}
+        </Tabs>
       </Paper>
 
       {/* IP列表表格 */}
@@ -1247,49 +1047,53 @@ function IPManagement() {
         </TableContainer>
         
         {/* 分页组件 */}
-        <TablePagination
-          component="div"
-          count={getFilteredDataCount()}
-          page={page}
-          onPageChange={handleChangePage}
-          rowsPerPage={rowsPerPage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-          rowsPerPageOptions={[10, 25, 50, 100, customRowsPerPage].filter((value, index, self) => self.indexOf(value) === index).sort((a, b) => a - b)}
-          labelRowsPerPage="每页显示:"
-          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
-          showFirstButton
-          showLastButton
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2 }}>
+          {/* 分页设置 */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              每页显示：
+            </Typography>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <Select
+                value={rowsPerPage}
+                onChange={handleChangeRowsPerPage}
+                displayEmpty
+              >
+                <MenuItem value={10}>10 条</MenuItem>
+                <MenuItem value={25}>25 条</MenuItem>
+                <MenuItem value={50}>50 条</MenuItem>
+                <MenuItem value={100}>100 条</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              type="number"
+              label="自定义数量"
+              value={customRowsPerPage}
+              onChange={handleCustomRowsPerPageChange}
+              onBlur={handleCustomRowsPerPageBlur}
+              onKeyDown={handleCustomRowsPerPageKeyDown}
+              inputProps={{ min: 1, max: 10000 }}
+              sx={{ width: 120 }}
+            />
+          </Box>
+          
+          {/* 分页导航 */}
+          <TablePagination
+            component="div"
+            count={getFilteredDataCount()}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100, customRowsPerPage].filter((value, index, self) => self.indexOf(value) === index).sort((a, b) => a - b)}
+            labelRowsPerPage="每页显示:"
+            labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
+            showFirstButton
+            showLastButton
+          />
+        </Box>
       </Paper>
-
-      {/* 编辑组对话框 */}
-      <Dialog open={!!editGroupId} onClose={() => setEditGroupId('')} maxWidth="sm" fullWidth>
-        <DialogTitle>编辑组信息</DialogTitle>
-        <DialogContent>
-          <TextField
-            fullWidth
-            label="组名"
-            value={editGroupName}
-            onChange={(e) => setEditGroupName(e.target.value)}
-            size="small"
-          />
-          <TextField
-            fullWidth
-            label="描述"
-            value={editGroupDescription}
-            onChange={(e) => setEditGroupDescription(e.target.value)}
-            size="small"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditGroupId('')} color="primary">
-            取消
-          </Button>
-          <Button onClick={saveGroup} color="primary" disabled={editGroupLoading}>
-            {editGroupLoading ? '保存中...' : '保存'}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* 修改IP所属组对话框 */}
       <Dialog open={changeGroupDialog} onClose={() => setChangeGroupDialog(false)} maxWidth="sm" fullWidth>
@@ -1450,9 +1254,9 @@ function IPManagement() {
         </DialogActions>
       </Dialog>
 
-      {/* 批量导入对话框 */}
-      <Dialog open={batchImportDialog} onClose={() => setBatchImportDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>批量导入IP</DialogTitle>
+      {/* 导入规则对话框 */}
+      <Dialog open={importDialog} onClose={() => setImportDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>导入规则</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             请选择导入方式并输入要导入的IP地址或CIDR
@@ -1557,11 +1361,11 @@ function IPManagement() {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setBatchImportDialog(false)} disabled={importLoading}>
+          <Button onClick={() => setImportDialog(false)} disabled={importLoading}>
             取消
           </Button>
           <Button 
-            onClick={handleBatchImport} 
+            onClick={handleImport} 
             color="primary" 
             disabled={importLoading || (!importText.trim() && !importUrl.trim()) || !importGroupId}
           >
