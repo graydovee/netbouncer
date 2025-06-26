@@ -4,31 +4,31 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](Dockerfile)
 
-[English](README.md) | [中文](README_zh.md)
+[English](README_en.md) | [中文](README.md)
 
-NetBouncer is a high-performance network traffic monitoring tool that provides real-time traffic statistics, IP management, and a modern web interface. It supports iptables/ipset firewall, IP group management, batch operations, and more.
+NetBouncer 是一个高性能的网络流量监控工具，提供实时流量统计、IP管理和现代化的Web界面。支持iptables/ipset防火墙、IP分组管理、批量操作等功能。
 
-## ✨ Key Features
+## ✨ 主要特性
 
-- 🔍 **Real-time Traffic Monitoring**: High-performance network packet capture based on libpcap
-- 📊 **Visual Interface**: Modern React web interface with real-time traffic statistics
-- 🛡️ **IP Management**: Support for banning/allowing individual IPs or CIDR ranges
-- 📁 **Group Management**: IP group management for batch operations
-- ⚡ **High Performance**: Built with Go, supporting high-concurrency traffic processing
-- 🗄️ **Multiple Storage Backends**: Support for SQLite, MySQL, PostgreSQL databases
-- 🔧 **Flexible Configuration**: Support for config files, command-line parameters, and Docker deployment
-- 📱 **Responsive Design**: Web interface adapted for desktop and mobile devices
-- 🛡️ **Multiple Firewall Types**: Support for iptables, ipset, and mock modes
+- 🔍 **实时流量监控**: 基于libpcap的高性能网络包捕获
+- 📊 **可视化界面**: 现代化的React Web界面，实时显示流量统计
+- 🛡️ **IP管理**: 支持单个IP或CIDR网段的封禁/允许管理
+- 📁 **分组管理**: 支持IP分组管理，便于批量操作
+- ⚡ **高性能**: 使用Go语言开发，支持高并发流量处理
+- 🗄️ **多存储后端**: 支持SQLite、MySQL、PostgreSQL数据库
+- 🔧 **灵活配置**: 支持配置文件、命令行参数和Docker部署
+- 📱 **响应式设计**: 适配桌面和移动设备的Web界面
+- 🛡️ **多种防火墙**: 支持iptables、ipset和mock模式
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Option 1: Using Docker (Recommended)
+### 方式一：使用Docker（推荐）
 
 ```bash
-# Pull the latest image
+# 拉取最新镜像
 docker pull graydovee/netbouncer:latest
 
-# Run container
+# 运行容器
 docker run -d \
   --name netbouncer \
   --network host \
@@ -36,101 +36,101 @@ docker run -d \
   --cap-add=NET_RAW \
   graydovee/netbouncer:latest
 
-# Access web interface
+# 访问Web界面
 # http://localhost:8080
 ```
 
-### Option 2: Build from Source
+### 方式二：从源码构建
 
-#### Prerequisites
+#### 前置要求
 
 - Go 1.24.3+
-- Node.js 18+ (for building frontend)
+- Node.js 18+ (用于构建前端)
 - libpcap-dev (Linux)
-- iptables/ipset (for firewall functionality)
+- iptables/ipset (用于防火墙功能)
 
-#### Build Steps
+#### 构建步骤
 
 ```bash
-# 1. Clone repository
+# 1. 克隆仓库
 git clone https://github.com/graydovee/netbouncer.git
 cd netbouncer
 
-# 2. Build frontend and backend
+# 2. 构建前端和后端
 make all
 
-# 3. Run application
+# 3. 运行应用
 ./bin/netbouncer
 ```
 
-## 📖 Usage Guide
+## 📖 使用指南
 
-### Basic Usage
+### 基本使用
 
 ```bash
-# Start with default configuration (ipset mode)
+# 使用默认配置启动（ipset模式）
 netbouncer
 
-# Start with config file
+# 使用配置文件启动
 netbouncer -c config.yaml
 
-# Specify network interface and listen address
+# 指定网络接口和监听地址
 netbouncer -i eth0 -l 0.0.0.0:9090
 
-# Use iptables firewall mode
+# 使用iptables防火墙模式
 netbouncer --firewall-type iptables
 
-# Use mock mode (for debugging)
+# 使用mock模式（调试用）
 netbouncer --firewall-type mock
 ```
 
-### Configuration File Setup
+### 配置文件设置
 
-Create a `config.yaml` file:
+创建 `config.yaml` 文件：
 
 ```yaml
-# Monitor configuration
+# 监控配置
 monitor:
-  interface: "eth0"  # Network interface name (leave empty for auto-selection)
+  interface: "eth0"  # 网络接口名称（留空自动选择）
   exclude_subnets: "127.0.0.1/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-  window: 60  # Monitoring time window (seconds)
-  timeout: 86400  # Time to clean up inactive connections (seconds)
+  window: 60  # 监控时间窗口（秒）
+  timeout: 86400  # 监控清理不活跃连接的时间（秒）
 
-# Firewall configuration
+# 防火墙配置
 firewall:
-  chain: "NETBOUNCER"  # iptables chain name
-  ipset: "netbouncer"  # ipset name
-  type: "ipset"        # Firewall type: iptables, ipset, mock
+  chain: "NETBOUNCER"  # iptables链名称
+  ipset: "netbouncer"  # ipset名称
+  type: "ipset"        # 防火墙类型：iptables, ipset, mock
 
-# Web service configuration
+# Web服务配置
 web:
-  listen: "0.0.0.0:8080"  # Web service listen address
+  listen: "0.0.0.0:8080"  # Web服务监听地址
 
-# Database configuration
+# 数据库配置
 database:
   driver: "sqlite"        # "sqlite", "mysql", "postgres"
-  host: ""                # Database host address
-  port: 0                 # Database port
-  username: ""            # Database username
-  password: ""            # Database password
-  database: "netbouncer.db"  # Database name or file path
-  dsn: ""                 # Database connection string (optional)
-  log_level: "info"       # SQL log level: "silent", "error", "warn", "info"
+  host: ""                # 数据库主机地址
+  port: 0                 # 数据库端口号
+  username: ""            # 数据库用户名
+  password: ""            # 数据库密码
+  database: "netbouncer.db"  # 数据库名称或文件路径
+  dsn: ""                 # 数据库连接字符串（可选）
+  log_level: "info"       # SQL日志级别: "silent", "error", "warn", "info"
 
-# Initial rules configuration
+# 初始规则配置
 rules:
-  # Example: Create a default blocked group
+  # 示例：创建一个默认的封禁组
   - group: "blocked"
-    groupDescription: "Default blocked group"
+    groupDescription: "默认封禁组"
     action: "block"
     override: false
     ipNets:
       - "192.168.1.100"
       - "10.0.0.0/24"
   
-  # Example: Create a whitelist group
+  # 示例：创建一个白名单组
   - group: "whitelist"
-    groupDescription: "Whitelist group"
+    groupDescription: "白名单组"
     action: "allow"
     override: true
     ipNets:
@@ -138,64 +138,64 @@ rules:
       - "192.168.1.1"
 ```
 
-### Rules Configuration
+### 规则配置说明
 
-The `rules` section allows you to pre-configure IP groups and rules that will be created automatically when the application starts. This is useful for setting up default block lists, whitelists, and other common configurations.
+`rules` 配置项允许您在应用启动时预配置IP分组和规则，这些规则将自动创建。这对于设置默认封禁列表、白名单和其他常用配置非常有用。
 
-#### Rules Configuration Fields
+#### 规则配置字段
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `group` | string | Yes | Group name to identify the rule group |
-| `groupDescription` | string | No | Group description explaining the purpose |
-| `action` | string | Yes | Action type: `block` or `allow` |
-| `override` | bool | No | Whether to override existing groups (default: false) |
-| `ipNets` | []string | Yes | List of IP addresses or CIDR ranges |
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group` | string | 是 | 分组名称，用于标识该规则组 |
+| `groupDescription` | string | 否 | 分组描述，用于说明该组的用途 |
+| `action` | string | 是 | 动作类型：`block`（封禁）或 `allow`（允许） |
+| `override` | bool | 否 | 是否覆盖已存在的分组（默认：false） |
+| `ipNets` | []string | 是 | IP地址或CIDR网段列表 |
 
-#### Use Cases
+#### 使用场景
 
-- **Pre-configured block lists**: Automatically create groups with known malicious IPs
-- **Whitelist configuration**: Pre-configure trusted IP addresses
-- **Testing environment**: Quickly set up test data for development
-- **Production environment**: Pre-configure necessary IP rules based on security policies
+- **预配置封禁列表**: 自动创建包含已知恶意IP的分组
+- **白名单配置**: 预配置可信IP地址
+- **测试环境**: 在开发或测试环境中快速设置测试数据
+- **生产环境**: 根据安全策略预配置必要的IP规则
 
-### Common Command Line Parameters
+### 常用命令行参数
 
-| Parameter | Short | Description | Default |
-|-----------|-------|-------------|---------|
-| `--config` | `-c` | Config file path | - |
-| `--monitor-interface` | `-i` | Network interface name | Auto-select |
-| `--monitor-exclude-subnets` | `-e` | Excluded subnets | - |
-| `--firewall-type` | `-f` | Firewall type (iptables\|ipset\|mock) | ipset |
-| `--listen` | `-l` | Web service listen address | 0.0.0.0:8080 |
-| `--db-driver` | - | Database driver (sqlite\|mysql\|postgres) | sqlite |
-| `--db-name` | - | Database name or file path | netbouncer.db |
-| `--db-log-level` | - | SQL log level (silent\|error\|warn\|info) | info |
+| 参数 | 简写 | 说明 | 默认值 |
+|------|------|------|--------|
+| `--config` | `-c` | 配置文件路径 | - |
+| `--monitor-interface` | `-i` | 网络接口名称 | 自动选择 |
+| `--monitor-exclude-subnets` | `-e` | 排除的子网 | - |
+| `--firewall-type` | `-f` | 防火墙类型 (iptables\|ipset\|mock) | ipset |
+| `--listen` | `-l` | Web服务监听地址 | 0.0.0.0:8080 |
+| `--db-driver` | - | 数据库驱动 (sqlite\|mysql\|postgres) | sqlite |
+| `--db-name` | - | 数据库名称或文件路径 | netbouncer.db |
+| `--db-log-level` | - | SQL日志级别 (silent\|error\|warn\|info) | info |
 
-## 🌐 Web Interface Usage
+## 🌐 Web界面使用
 
-After starting the application, visit `http://localhost:8080` to access the web interface:
+启动应用后，访问 `http://localhost:8080` 进入Web界面：
 
-### Traffic Monitor Page
-- View real-time network connection traffic statistics
-- Sort by traffic, connections, and other fields
-- Configurable auto-refresh interval
-- One-click IP ban functionality
+### 流量监控页面
+- 实时查看网络连接流量统计
+- 支持按流量、连接数等字段排序
+- 可配置自动刷新间隔
+- 一键封禁IP功能
 
-### IP Management Page
-- View all IPs or by group
-- Add new IP addresses or CIDR ranges
-- Modify IP behavior (ban/allow)
-- Change IP group membership
-- Batch operations and bulk import
+### IP管理页面
+- 查看所有IP或按组查看
+- 添加新的IP地址或CIDR网段
+- 修改IP行为（封禁/允许）
+- 修改IP所属组
+- 批量操作和批量导入
 
-### Group Management Page
-- Create, edit, and delete IP groups
-- View group lists and group information
+### 组管理页面
+- 创建、编辑、删除IP分组
+- 查看组列表和组信息
 
-## 🗄️ Database Configuration
+## 🗄️ 数据库配置
 
-### SQLite (Default, Recommended)
+### SQLite（默认，推荐）
 
 ```yaml
 database:
@@ -227,9 +227,9 @@ database:
   database: "netbouncer"
 ```
 
-## 🛡️ Firewall Configuration
+## 🛡️ 防火墙配置
 
-### ipset Mode (Default)
+### ipset模式（默认）
 
 ```yaml
 firewall:
@@ -237,7 +237,7 @@ firewall:
   ipset: "netbouncer"
 ```
 
-### iptables Mode
+### iptables模式
 
 ```yaml
 firewall:
@@ -245,18 +245,18 @@ firewall:
   chain: "NETBOUNCER"
 ```
 
-### mock Mode (Debug)
+### mock模式（调试用）
 
 ```yaml
 firewall:
   type: "mock"
 ```
 
-## 🐳 Docker Deployment
+## 🐳 Docker部署
 
-### Using Docker Compose
+### 使用Docker Compose
 
-Create `docker-compose.yml`:
+创建 `docker-compose.yml`：
 
 ```yaml
 version: '3.8'
@@ -276,72 +276,46 @@ services:
     restart: unless-stopped
 ```
 
-Run:
+运行：
 ```bash
 docker-compose up -d
 ```
 
-## 🔧 Development
+## 🔧 开发
 
-### Development Environment Setup
+### 开发环境设置
 
 ```bash
-# Install Go dependencies
+# 安装Go依赖
 go mod tidy
 
-# Start frontend development server
+# 启动前端开发服务器
 make web-dev
 
-# Run backend (mock mode)
+# 运行后端（mock模式）
 ./bin/netbouncer --firewall-type mock
 ```
 
-### Build
+### 构建
 
 ```bash
-# Build all components
+# 构建所有组件
 make all
 
-# Build Go program only
+# 仅构建Go程序
 make build-go
 
-# Build frontend only
+# 仅构建前端
 make build-web
 ```
 
-## 📊 API Interface
+## 📊 API接口
 
-For detailed API documentation, see [API.md](API.md)
+详细的API文档请参考 [API.md](API.md)
 
-Main API endpoints:
-- `GET /api/traffic` - Get traffic statistics
-- `GET /api/ip` - Get IP list
-- `POST /api/ip` - Create IP rule
-- `GET /api/group` - Get group list
-- `POST /api/group` - Create group
-
-## 🔒 Security Notes
-
-- Using iptables or ipset requires root privileges
-- Production environments should use database storage
-- Regularly backup configuration files and data
-- Do not commit configuration files with sensitive information to version control
-
-## 🤝 Contributing
-
-Issues and Pull Requests are welcome!
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Support
-
-- Check [Issues](https://github.com/graydovee/netbouncer/issues)
-- Create a new Issue
-- See [CONFIGURATION.md](CONFIGURATION.md) for detailed configuration
-- See [API.md](API.md) for API interface
-
----
-
-**NetBouncer** - Making network monitoring simple and efficient 🚀 
+主要API端点：
+- `GET /api/traffic` - 获取流量统计
+- `GET /api/ip` - 获取IP列表
+- `POST /api/ip` - 创建IP规则
+- `GET /api/group` - 获取组列表
+- `POST /api/group`
