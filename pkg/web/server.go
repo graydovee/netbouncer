@@ -2,6 +2,7 @@ package web
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -102,6 +103,7 @@ func (s *Server) handleImportIpNet(c echo.Context) error {
 
 	text := r.Text
 	if r.Url != "" {
+		slog.Info("从URL导入地址", "url", r.Url)
 		response, err := http.Get(r.Url)
 		if err != nil {
 			return c.JSON(http.StatusOK, Error(500, err.Error()))
