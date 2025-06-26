@@ -88,7 +88,7 @@ func (s *NetService) Init(items []config.RulesInitConfig) error {
 				continue
 			}
 
-			s.CreateIpNet(ipNet, group.ID, item.Action)
+			s.CreateOrUpdateIpNet(ipNet, group.ID, item.Action)
 			slog.Info("初始化规则", "ip", ipNet, "group", group.Name, "action", item.Action)
 		}
 	}
@@ -174,7 +174,9 @@ func (s *NetService) GetStats() ([]TrafficData, error) {
 	return trafficData, nil
 }
 
-func (s *NetService) CreateIpNet(ipnet string, groupId uint, action string) error {
+// CreateOrUpdateIpNet 创建或更新IP网络
+// 如果IP网络已存在，则更新action, 忽略组信息
+func (s *NetService) CreateOrUpdateIpNet(ipnet string, groupId uint, action string) error {
 
 	// 如果没有指定组ID，使用默认组
 	if groupId == 0 {
@@ -201,7 +203,7 @@ func (s *NetService) CreateIpNet(ipnet string, groupId uint, action string) erro
 	}
 
 	if s.store.IpNetStore.ExistsByIpNet(ipnet) {
-		// 如果IP网络已存在，则更新action
+		// 如果IP网络已存在，则更新action, 忽略组信息
 		ipNet, err := s.store.IpNetStore.FindByIpNet(ipnet)
 		if err != nil {
 			return err
@@ -434,7 +436,7 @@ func (s *NetService) ImportIpNet(text string, groupId uint, action string) (int,
 	errorCount := 0
 
 	for _, match := range ipnets {
-		err := s.CreateIpNet(match, groupId, action)
+		err := s.CreateOrUpdateIpNet(match, groupId, action)
 		if err != nil {
 			errorCount++
 			slog.Error("导入地址失败", "ipnet", match, "error", err)

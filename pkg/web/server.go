@@ -87,7 +87,7 @@ func (s *Server) handleCreateIpNet(c echo.Context) error {
 		return c.JSON(http.StatusOK, Error(400, "无效的IP地址或CIDR格式"))
 	}
 
-	err := s.netService.CreateIpNet(r.IpNet, r.GroupId, r.Action)
+	err := s.netService.CreateOrUpdateIpNet(r.IpNet, r.GroupId, r.Action)
 	if err != nil {
 		return c.JSON(http.StatusOK, Error(500, err.Error()))
 	}
