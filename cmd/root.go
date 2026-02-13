@@ -4,6 +4,7 @@ Copyright © 2025 graydovee
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -144,7 +145,31 @@ func run() error {
 		return fmt.Errorf("初始化失败: %w", err)
 	}
 
-	server := web.NewServer(svc)
+	// 创建认证处理器
+	authHandler, err := web.NewAuthHandler(context.Background(), &web.AuthConfig{
+		Enabled:       cfg.Web.Auth.Enabled,
+		Type:          cfg.Web.Auth.Type,
+		BasicUsername: cfg.Web.Auth.Basic.Username,
+		BasicPassword: cfg.Web.Auth.Basic.Password,
+		ClientID:      cfg.Web.Auth.OIDC.ClientID,
+		ClientSecret:  cfg.Web.Auth.OIDC.ClientSecret,
+		IssuerURL:     cfg.Web.Auth.OIDC.IssuerURL,
+		RedirectURL:   cfg.Web.Auth.OIDC.RedirectURL,
+		SessionSecret: cfg.Web.Auth.OIDC.SessionSecret,
+	})
+	if err != nil {
+		return fmt.Errorf("创建认证处理器失败: %w", err)
+	}
+
+	if cfg.Web.Auth.Enabled {
+		if cfg.Web.Auth.Type == "basic" {
+			slog.Info("BasicAuth认证已启用", "username", cfg.Web.Auth.Basic.Username)
+		} else {
+			slog.Info("OIDC认证已启用", "issuer", cfg.Web.Auth.OIDC.IssuerURL)
+		}
+	}
+
+	server := web.NewServer(svc, authHandler)
 	slog.Info("Web服务已启动", "listen", cfg.Web.Listen)
 	if err := server.Start(cfg.Web.Listen); err != nil {
 		return err

@@ -16,6 +16,21 @@ firewall:
 # Web服务配置
 web:
   listen: "0.0.0.0:8080"  # Web服务监听地址
+  # 认证配置（可选）
+  auth:
+    enabled: false                    # 是否启用认证
+    type: "basic"                     # 认证类型: "basic" 或 "oidc"
+    # BasicAuth配置（当 type 为 "basic" 时使用）
+    basic:
+      username: "admin"               # 用户名
+      password: "admin123"            # 密码
+    # OIDC配置（当 type 为 "oidc" 时使用）
+    oidc:
+      client_id: ""                   # OIDC客户端ID
+      client_secret: ""               # OIDC客户端密钥
+      issuer_url: ""                  # OIDC提供者URL，如: https://accounts.google.com
+      redirect_url: ""                # 重定向URL，如: http://localhost:8080/auth/callback
+      session_secret: ""              # Session签名密钥（可选，留空自动生成）
 
 # 数据库配置
 database:
@@ -33,7 +48,7 @@ rules:
   # 示例：创建一个默认的封禁组
   - group: "blocked"
     groupDescription: "默认封禁组"
-    action: "block"
+    action: "ban"
     override: false
     ipNets:
       - "192.168.1.100"
@@ -92,4 +107,4 @@ rules:
 
 # 使用DSN连接字符串（优先级最高）
 # database:
-#   dsn: "mysql://user:password@localhost:3306/netbouncer" 
+#   dsn: "mysql://user:password@localhost:3306/netbouncer"

@@ -15,6 +15,10 @@ import {
   ListItemText,
   useTheme,
   useMediaQuery,
+  Menu,
+  MenuItem,
+  Avatar,
+  Tooltip,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -23,7 +27,10 @@ import {
   Group as GroupIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
+  AccountCircle as AccountCircleIcon,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
+import { useAuth } from '../context/AuthContext';
 
 const drawerWidth = 240;
 
@@ -36,10 +43,12 @@ const menuItems = [
 function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [anchorEl, setAnchorEl] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { user, authEnabled, isAuthenticated, logout } = useAuth();
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -54,6 +63,31 @@ function Layout({ children }) {
     if (isMobile) {
       setMobileOpen(false);
     }
+  };
+
+  const handleUserMenuOpen = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleUserMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    handleUserMenuClose();
+    logout();
+  };
+
+  const getUserDisplayName = () => {
+    if (!user) return '用户';
+    return user.name || user.email || '用户';
+  };
+
+  const getUserInitial = () => {
+    if (!user) return 'U';
+    if (user.name) return user.name.charAt(0).toUpperCase();
+    if (user.email) return user.email.charAt(0).toUpperCase();
+    return 'U';
   };
 
   const drawer = (
@@ -108,9 +142,55 @@ function Layout({ children }) {
           >
             {isMobile ? <MenuIcon /> : (sidebarOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />)}
           </IconButton>
-          <Typography variant="h6" noWrap component="div">
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             {menuItems.find(item => item.path === location.pathname)?.text || '网络监控系统'}
           </Typography>
+          {authEnabled && isAuthenticated && (
+            <>
+              <Tooltip title={getUserDisplayName()}>
+                <IconButton
+                  onClick={handleUserMenuOpen}
+                  color="inherit"
+                >
+                  {user?.picture ? (
+                    <Avatar
+                      src={user.picture}
+                      alt={getUserDisplayName()}
+                      sx={{ width: 32, height: 32 }}
+                    />
+                  ) : (
+                    <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
+                      {getUserInitial()}
+                    </Avatar>
+                  )}
+                </IconButton>
+              </Tooltip>
+              <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={handleUserMenuClose}
+                anchorOrigin={{
+                  vertical: 'bottom',
+                  horizontal: 'right',
+                }}
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
+                }}
+              >
+                <MenuItem disabled>
+                  <Typography variant="body2" color="text.secondary">
+                    {user?.email || getUserDisplayName()}
+                  </Typography>
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={handleLogout}>
+                  <LogoutIcon sx={{ mr: 1 }} fontSize="small" />
+                  退出登录
+                </MenuItem>
+              </Menu>
+            </>
+          )}
         </Toolbar>
       </AppBar>
       
@@ -183,4 +263,4 @@ function Layout({ children }) {
   );
 }
 
-export default Layout; 
+export default Layout;

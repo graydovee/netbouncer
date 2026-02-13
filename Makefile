@@ -31,7 +31,7 @@ web-dev:
 	cd website && VITE_BACKEND_URL=$(or $(VITE_BACKEND_URL),http://localhost:8080) npm run dev
 
 build-go: tidy
-	go build -o bin/netbouncer main.go
+	CGO_ENABLED=1 go build -o bin/netbouncer main.go
 
 debug:
 	./bin/netbouncer --debug

@@ -320,6 +320,108 @@ Main API endpoints:
 - `GET /api/group` - Get group list
 - `POST /api/group` - Create group
 
+## 🔐 Authentication Configuration
+
+NetBouncer supports two authentication methods: **BasicAuth** (simple username/password) and **OIDC** (OpenID Connect).
+
+### BasicAuth (Recommended for Simple Deployment)
+
+BasicAuth is the simplest authentication method, only requiring username and password:
+
+```yaml
+web:
+  listen: "0.0.0.0:8080"
+  auth:
+    enabled: true                      # Enable authentication
+    type: "basic"                      # Authentication type
+    basic:
+      username: "admin"                # Username
+      password: "your-secure-password" # Password
+```
+
+#### BasicAuth Features
+- Simple and easy to use, no external dependencies
+- Supports browser popup login dialog
+- Supports frontend login page
+- Supports API requests using Authorization header
+
+#### API Call Example
+```bash
+curl -u admin:your-password http://localhost:8080/api/traffic
+```
+
+### OIDC (Recommended for Enterprise Deployment)
+
+OIDC supports integration with external identity providers:
+
+```yaml
+web:
+  listen: "0.0.0.0:8080"
+  auth:
+    enabled: true                      # Enable authentication
+    type: "oidc"                       # Authentication type
+    oidc:
+      client_id: "your-client-id"        # OIDC client ID
+      client_secret: "your-client-secret" # OIDC client secret
+      issuer_url: "https://accounts.google.com"  # OIDC provider URL
+      redirect_url: "http://localhost:8080/auth/callback"  # Callback URL
+```
+
+#### Common OIDC Provider Configurations
+
+**Google:**
+```yaml
+auth:
+  enabled: true
+  type: "oidc"
+  oidc:
+    client_id: "xxx.apps.googleusercontent.com"
+    client_secret: "xxx"
+    issuer_url: "https://accounts.google.com"
+    redirect_url: "http://your-domain:8080/auth/callback"
+```
+
+**Keycloak:**
+```yaml
+auth:
+  enabled: true
+  type: "oidc"
+  oidc:
+    client_id: "netbouncer"
+    client_secret: "xxx"
+    issuer_url: "https://keycloak.example.com/realms/your-realm"
+    redirect_url: "http://your-domain:8080/auth/callback"
+```
+
+**Authentik:**
+```yaml
+auth:
+  enabled: true
+  type: "oidc"
+  oidc:
+    client_id: "netbouncer"
+    client_secret: "xxx"
+    issuer_url: "https://authentik.example.com/application/o/netbouncer/"
+    redirect_url: "http://your-domain:8080/auth/callback"
+```
+
+### Authentication Flow
+
+1. User accesses web interface
+2. If not logged in:
+   - BasicAuth: Shows login page or browser popup
+   - OIDC: Redirects to OIDC provider login page
+3. After successful authentication, access the application
+4. Session remains valid for 24 hours
+
+### API Authentication
+
+When authentication is enabled, API requests require authentication:
+- **BasicAuth**: Use `Authorization: Basic base64(username:password)` header
+- **OIDC**: Requires valid session cookie
+
+Unauthenticated API requests will return a 401 error.
+
 ## 🔒 Security Notes
 
 - Using iptables or ipset requires root privileges
@@ -344,4 +446,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**NetBouncer** - Making network monitoring simple and efficient 🚀 
+**NetBouncer** - Making network monitoring simple and efficient 🚀

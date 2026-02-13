@@ -13,25 +13,34 @@ import (
 )
 
 type Server struct {
-	netService *service.NetService
-	echo       *echo.Echo
+	netService  *service.NetService
+	echo        *echo.Echo
+	authHandler AuthHandler
 }
 
-func NewServer(netService *service.NetService) *Server {
+func NewServer(netService *service.NetService, authHandler AuthHandler) *Server {
 	e := echo.New()
 
 	// 隐藏Echo框架的banner
 	e.HideBanner = true
 
 	svr := &Server{
-		netService: netService,
-		echo:       e,
+		netService:  netService,
+		echo:        e,
+		authHandler: authHandler,
 	}
 
 	// 中间件
 	e.Use(slogLogger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
+
+	// 注册认证相关路由（不需要认证）
+	if authHandler != nil {
+		authHandler.RegisterRoutes(e)
+		// 添加认证中间件
+		e.Use(authHandler.AuthMiddleware())
+	}
 
 	// API路由
 	e.GET("/api/traffic", svr.handleGetTraffic)

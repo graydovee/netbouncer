@@ -318,4 +318,106 @@ make build-web
 - `GET /api/ip` - 获取IP列表
 - `POST /api/ip` - 创建IP规则
 - `GET /api/group` - 获取组列表
-- `POST /api/group`
+- `POST /api/group` - 创建组
+
+## 🔐 认证配置
+
+NetBouncer 支持两种认证方式：**BasicAuth**（简单用户名密码）和 **OIDC**（OpenID Connect）。
+
+### BasicAuth 认证（推荐简单部署）
+
+BasicAuth 是最简单的认证方式，只需配置用户名和密码：
+
+```yaml
+web:
+  listen: "0.0.0.0:8080"
+  auth:
+    enabled: true                      # 启用认证
+    type: "basic"                      # 认证类型
+    basic:
+      username: "admin"                # 用户名
+      password: "your-secure-password" # 密码
+```
+
+#### BasicAuth 特点
+- 简单易用，无需外部依赖
+- 支持浏览器弹出登录框
+- 支持前端登录页面
+- 支持API请求使用 Authorization 头
+
+#### API 调用示例
+```bash
+curl -u admin:your-password http://localhost:8080/api/traffic
+```
+
+### OIDC 认证（推荐企业部署）
+
+OIDC 支持与外部身份提供商集成：
+
+```yaml
+web:
+  listen: "0.0.0.0:8080"
+  auth:
+    enabled: true                      # 启用认证
+    type: "oidc"                       # 认证类型
+    oidc:
+      client_id: "your-client-id"        # OIDC客户端ID
+      client_secret: "your-client-secret" # OIDC客户端密钥
+      issuer_url: "https://accounts.google.com"  # OIDC提供者URL
+      redirect_url: "http://localhost:8080/auth/callback"  # 回调地址
+```
+
+#### 常用OIDC提供者配置
+
+**Google:**
+```yaml
+auth:
+  enabled: true
+  type: "oidc"
+  oidc:
+    client_id: "xxx.apps.googleusercontent.com"
+    client_secret: "xxx"
+    issuer_url: "https://accounts.google.com"
+    redirect_url: "http://your-domain:8080/auth/callback"
+```
+
+**Keycloak:**
+```yaml
+auth:
+  enabled: true
+  type: "oidc"
+  oidc:
+    client_id: "netbouncer"
+    client_secret: "xxx"
+    issuer_url: "https://keycloak.example.com/realms/your-realm"
+    redirect_url: "http://your-domain:8080/auth/callback"
+```
+
+**Authentik:**
+```yaml
+auth:
+  enabled: true
+  type: "oidc"
+  oidc:
+    client_id: "netbouncer"
+    client_secret: "xxx"
+    issuer_url: "https://authentik.example.com/application/o/netbouncer/"
+    redirect_url: "http://your-domain:8080/auth/callback"
+```
+
+### 认证流程
+
+1. 用户访问Web界面
+2. 如果未登录：
+   - BasicAuth: 显示登录页面或浏览器弹窗
+   - OIDC: 重定向到OIDC提供者登录页面
+3. 认证成功后访问应用
+4. Session保持24小时有效
+
+### API认证
+
+启用认证后，API请求需要认证：
+- **BasicAuth**: 使用 `Authorization: Basic base64(username:password)` 头
+- **OIDC**: 需要有效的Session Cookie
+
+未认证的API请求将返回401错误。

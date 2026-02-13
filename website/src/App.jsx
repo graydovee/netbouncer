@@ -2,6 +2,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Layout from './components/Layout';
+import ProtectedRoute from './components/ProtectedRoute';
+import { AuthProvider } from './context/AuthContext';
 import TrafficMonitor from './pages/TrafficMonitor';
 import IPManagement from './pages/IPManagement';
 import GroupManagement from './pages/GroupManagement';
@@ -32,16 +34,20 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<TrafficMonitor />} />
-            <Route path="/ip-management" element={<IPManagement />} />
-            <Route path="/groups" element={<GroupManagement />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Layout>
-      </Router>
+      <AuthProvider>
+        <Router>
+          <ProtectedRoute>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<TrafficMonitor />} />
+                <Route path="/ip-management" element={<IPManagement />} />
+                <Route path="/groups" element={<GroupManagement />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Layout>
+          </ProtectedRoute>
+        </Router>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

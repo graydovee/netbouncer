@@ -42,7 +42,31 @@ type RulesInitConfig struct {
 
 // WebConfig Web服务配置
 type WebConfig struct {
-	Listen string `yaml:"listen"` // Web服务监听地址
+	Listen string     `yaml:"listen"` // Web服务监听地址
+	Auth   AuthConfig `yaml:"auth"`   // 认证配置
+}
+
+// AuthConfig 认证配置
+type AuthConfig struct {
+	Enabled bool            `yaml:"enabled"` // 是否启用认证
+	Type    string          `yaml:"type"`    // 认证类型: "basic" 或 "oidc"
+	Basic   BasicAuthConfig `yaml:"basic"`   // BasicAuth配置
+	OIDC    OIDCConfig      `yaml:"oidc"`    // OIDC配置
+}
+
+// BasicAuthConfig BasicAuth认证配置
+type BasicAuthConfig struct {
+	Username string `yaml:"username"` // 用户名
+	Password string `yaml:"password"` // 密码
+}
+
+// OIDCConfig OIDC认证配置
+type OIDCConfig struct {
+	ClientID      string `yaml:"client_id"`      // OIDC客户端ID
+	ClientSecret  string `yaml:"client_secret"`  // OIDC客户端密钥
+	IssuerURL     string `yaml:"issuer_url"`     // OIDC提供者URL (如: https://accounts.google.com)
+	RedirectURL   string `yaml:"redirect_url"`   // 重定向URL (如: http://localhost:8080/auth/callback)
+	SessionSecret string `yaml:"session_secret"` // Session签名密钥
 }
 
 // DatabaseConfig 数据库配置
