@@ -86,6 +86,8 @@ netbouncer --firewall-type mock
 
 ### 配置文件设置
 
+> 💡 详细配置说明请参考 [CONFIGURATION.md](doc/CONFIGURATION.md)
+
 创建 `config.yaml` 文件：
 
 ```yaml
@@ -311,7 +313,7 @@ make build-web
 
 ## 📊 API接口
 
-详细的API文档请参考 [API.md](API.md)
+详细的API文档请参考 [API.md](doc/API.md)
 
 主要API端点：
 - `GET /api/traffic` - 获取流量统计

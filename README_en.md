@@ -86,6 +86,8 @@ netbouncer --firewall-type mock
 
 ### Configuration File Setup
 
+> 💡 For detailed configuration options, see [CONFIGURATION.md](doc/CONFIGURATION.md)
+
 Create a `config.yaml` file:
 
 ```yaml
@@ -311,7 +313,7 @@ make build-web
 
 ## 📊 API Interface
 
-For detailed API documentation, see [API.md](API.md)
+For detailed API documentation, see [API.md](doc/API.md)
 
 Main API endpoints:
 - `GET /api/traffic` - Get traffic statistics
@@ -441,8 +443,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Check [Issues](https://github.com/graydovee/netbouncer/issues)
 - Create a new Issue
-- See [CONFIGURATION.md](CONFIGURATION.md) for detailed configuration
-- See [API.md](API.md) for API interface
+- See [CONFIGURATION.md](doc/CONFIGURATION.md) for detailed configuration
+- See [API.md](doc/API.md) for API interface
 
 ---
 
