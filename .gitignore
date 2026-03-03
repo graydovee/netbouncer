@@ -6,6 +6,7 @@ config.yaml
 netbouncer.db
 bin/
 web/
+!/pkg/web
 
 vendor/
 
