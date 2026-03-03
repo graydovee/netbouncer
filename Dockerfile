@@ -16,7 +16,7 @@ COPY website/ .
 RUN npm run build
 
 # Go构建阶段
-FROM golang:1.24.3-bullseye AS builder
+FROM golang:1.25.7-bookworm AS builder
 
 # 安装依赖
 RUN apt-get update && apt-get install -y \
