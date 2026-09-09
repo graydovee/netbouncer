@@ -11,14 +11,15 @@ NetBouncer 是一个高性能的网络流量监控工具，提供实时流量统
 ## ✨ 主要特性
 
 - 🔍 **实时流量监控**: 基于libpcap的高性能网络包捕获
-- 📊 **可视化界面**: 现代化的React Web界面，实时显示流量统计
-- 🛡️ **IP管理**: 支持单个IP或CIDR网段的封禁/允许管理
+- 📊 **可视化界面**: 现代化的React + TypeScript Web界面，实时显示流量统计
+- 🛡️ **IP管理**: 支持单个IP或CIDR网段的封禁/允许管理，服务端分页与批量操作
 - 📁 **分组管理**: 支持IP分组管理，便于批量操作
 - ⚡ **高性能**: 使用Go语言开发，支持高并发流量处理
-- 🗄️ **多存储后端**: 支持SQLite、MySQL、PostgreSQL数据库
+- 🗄️ **存储**: 内置SQLite存储，无需外部数据库依赖
 - 🔧 **灵活配置**: 支持配置文件、命令行参数和Docker部署
 - 📱 **响应式设计**: 适配桌面和移动设备的Web界面
 - 🛡️ **多种防火墙**: 支持iptables、ipset和mock模式
+- 🔐 **多种认证**: 支持BasicAuth和OIDC认证
 
 ## 🚀 快速开始
 
@@ -110,7 +111,7 @@ web:
 
 # 数据库配置
 database:
-  driver: "sqlite"        # "sqlite", "mysql", "postgres"
+  driver: "sqlite"        # 目前仅支持 sqlite
   host: ""                # 数据库主机地址
   port: 0                 # 数据库端口号
   username: ""            # 数据库用户名
@@ -124,7 +125,7 @@ rules:
   # 示例：创建一个默认的封禁组
   - group: "blocked"
     groupDescription: "默认封禁组"
-    action: "block"
+    action: "ban"
     override: false
     ipNets:
       - "192.168.1.100"
@@ -150,8 +151,8 @@ rules:
 |------|------|------|------|
 | `group` | string | 是 | 分组名称，用于标识该规则组 |
 | `groupDescription` | string | 否 | 分组描述，用于说明该组的用途 |
-| `action` | string | 是 | 动作类型：`block`（封禁）或 `allow`（允许） |
-| `override` | bool | 否 | 是否覆盖已存在的分组（默认：false） |
+| `action` | string | 是 | 动作类型：`ban`（封禁）或 `allow`（允许） |
+| `override` | bool | 否 | 是否覆盖已存在的规则（默认：false） |
 | `ipNets` | []string | 是 | IP地址或CIDR网段列表 |
 
 #### 使用场景
@@ -170,7 +171,7 @@ rules:
 | `--monitor-exclude-subnets` | `-e` | 排除的子网 | - |
 | `--firewall-type` | `-f` | 防火墙类型 (iptables\|ipset\|mock) | ipset |
 | `--listen` | `-l` | Web服务监听地址 | 0.0.0.0:8080 |
-| `--db-driver` | - | 数据库驱动 (sqlite\|mysql\|postgres) | sqlite |
+| `--db-driver` | - | 数据库驱动（目前仅支持 sqlite） | sqlite |
 | `--db-name` | - | 数据库名称或文件路径 | netbouncer.db |
 | `--db-log-level` | - | SQL日志级别 (silent\|error\|warn\|info) | info |
 
@@ -197,36 +198,12 @@ rules:
 
 ## 🗄️ 数据库配置
 
-### SQLite（默认，推荐）
+目前支持 SQLite（默认，零配置）。配置中的 mysql/postgres 驱动选项为未来预留，当前使用会在启动时明确报错。
 
 ```yaml
 database:
   driver: "sqlite"
-  database: "netbouncer.db"
-```
-
-### MySQL
-
-```yaml
-database:
-  driver: "mysql"
-  host: "localhost"
-  port: 3306
-  username: "netbouncer"
-  password: "password"
-  database: "netbouncer"
-```
-
-### PostgreSQL
-
-```yaml
-database:
-  driver: "postgres"
-  host: "localhost"
-  port: 5432
-  username: "netbouncer"
-  password: "password"
-  database: "netbouncer"
+  database: "netbouncer.db"  # 数据库文件路径
 ```
 
 ## 🛡️ 防火墙配置
@@ -291,20 +268,32 @@ docker-compose up -d
 # 安装Go依赖
 go mod tidy
 
-# 启动前端开发服务器
+# 启动前端开发服务器（自动代理 /api 和 /auth 到本地后端）
 make web-dev
 
-# 运行后端（mock模式）
-./bin/netbouncer --firewall-type mock
+# 运行后端（mock模式，无需root权限）
+make run-mock
 ```
+
+### 测试与CI
+
+```bash
+# 后端测试
+make test
+
+# 前端测试（Vitest）+ 类型检查 + ESLint
+cd website && npm test && npm run typecheck && npm run lint
+```
+
+GitHub Actions 会在 push/PR 时自动运行：后端 `gofmt` + `go vet` + `golangci-lint` + `go test -race`，前端 `eslint` + `vitest` + `tsc` + 构建。
 
 ### 构建
 
 ```bash
-# 构建所有组件
+# 构建所有组件（前端嵌入二进制，单文件部署）
 make all
 
-# 仅构建Go程序
+# 仅构建Go程序（运行时需要与 web/ 目录同在）
 make build-go
 
 # 仅构建前端

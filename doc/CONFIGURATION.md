@@ -65,7 +65,7 @@ web:
 
 ```yaml
 database:
-  driver: "sqlite"        # 数据库驱动：sqlite, mysql, postgres
+  driver: "sqlite"        # 数据库驱动：目前仅支持 sqlite（mysql/postgres 尚未实现，启动时会报错）
   host: ""                # 数据库主机地址
   port: 0                 # 数据库端口号
   username: ""            # 数据库用户名
@@ -84,7 +84,7 @@ rules:
   # 创建一个默认的封禁组
   - group: "blocked"
     groupDescription: "默认封禁组"
-    action: "block"
+    action: "ban"
     override: false
     ipNets:
       - "192.168.1.100"
