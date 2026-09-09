@@ -13,6 +13,12 @@ linters:
     - bodyclose     # HTTP response body 未关闭
     - copyloopvar   # Go 1.22+ 循环变量拷贝冗余
     - unconvert     # 多余的类型转换
+  exclusions:
+    rules:
+      # 排除测试文件中的一些常见噪音
+      - path: _test\.go
+        linters:
+          - errcheck
 
 formatters:
   enable:
@@ -24,10 +30,5 @@ formatters:
         - github.com/graydovee/netbouncer
 
 issues:
-  # 排除测试文件中的一些常见噪音
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
   max-issues-per-linter: 0
   max-same-issues: 0
