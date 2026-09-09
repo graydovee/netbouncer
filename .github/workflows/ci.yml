@@ -35,7 +35,8 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # v2 格式配置（.golangci.yml version: "2"），需 v2 系列二进制
+          version: v2.4.0
 
       - name: Run tests
         run: CGO_ENABLED=1 go test -race ./...
