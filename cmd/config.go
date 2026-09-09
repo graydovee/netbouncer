@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/graydovee/netbouncer/pkg/config"
 	"github.com/spf13/cobra"
+
+	"github.com/graydovee/netbouncer/pkg/config"
 )
 
 var configCmd = &cobra.Command{
@@ -29,7 +30,8 @@ var generateConfigCmd = &cobra.Command{
 		if _, err := os.Stat(configFile); err == nil {
 			fmt.Printf("配置文件 %s 已存在，是否覆盖？(y/N): ", configFile)
 			var response string
-			fmt.Scanln(&response)
+			// 读取失败时 response 保持为空，等同于 N，拒绝覆盖
+			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
 				fmt.Println("操作已取消")
 				return

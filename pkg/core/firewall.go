@@ -3,9 +3,6 @@ package core
 import (
 	"fmt"
 	"log/slog"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/graydovee/netbouncer/pkg/config"
 	"github.com/graydovee/netbouncer/pkg/store"
@@ -32,6 +29,10 @@ func NewFirewallFromConfig(cfg *config.FirewallConfig) (*Firewall, error) {
 			chain: cfg.Chain,
 		}
 	case config.FirewallTypeIptables:
+		if cfg.Chain == "" {
+			return nil, fmt.Errorf("iptables chain is required")
+		}
+		slog.Info("使用Iptables防火墙", "chain", cfg.Chain)
 		core = &IptablesFirewallCore{
 			chain: cfg.Chain,
 		}
@@ -59,45 +60,24 @@ type FirewallCore interface {
 }
 
 // Firewall 提供统一的防火墙接口，通过组合不同的FirewallCore实现不同功能
+// 退出时的规则清理由 cmd 层统一在优雅退出流程中调用 Cleanup 完成
 type Firewall struct {
 	core FirewallCore
 }
 
 func NewFirewall(core FirewallCore) *Firewall {
-	firewall := &Firewall{
-		core: core,
-	}
-
-	// 注册程序退出信号监听，自动清理防火墙规则
-	go firewall.setupSignalHandler()
-
-	return firewall
-}
-
-func (f *Firewall) setupSignalHandler() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-
-	<-sigChan
-
-	slog.Info("收到退出信号，开始清理防火墙规则")
-	if err := f.Cleanup(); err != nil {
-		slog.Error("清理防火墙规则失败", "error", err)
-	}
-
-	os.Exit(0)
+	return &Firewall{core: core}
 }
 
 func (f *Firewall) Init(ipList []store.IpNet) error {
 	// 初始化防火墙规则
-	err := f.core.InitRules()
-	if err != nil {
+	if err := f.core.InitRules(); err != nil {
 		return fmt.Errorf("初始化防火墙规则失败: %w", err)
 	}
 
 	// 从传入的IP列表中加载所有IP到防火墙规则
 	for _, ipnet := range ipList {
-
+		var err error
 		switch ipnet.Action {
 		case store.ActionBan:
 			err = f.core.Ban(ipnet.IpNet)

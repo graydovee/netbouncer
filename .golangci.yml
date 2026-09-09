@@ -1,0 +1,33 @@
+# golangci-lint 配置（v2 格式）：https://golangci-lint.run/usage/configuration/
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck      # 未检查的错误
+    - govet         # go vet
+    - staticcheck   # 静态检查
+    - unused        # 未使用的代码
+    - ineffassign   # 无效赋值
+    - misspell      # 拼写错误
+    - bodyclose     # HTTP response body 未关闭
+    - copyloopvar   # Go 1.22+ 循环变量拷贝冗余
+    - unconvert     # 多余的类型转换
+
+formatters:
+  enable:
+    - gofmt         # 格式
+    - goimports     # import 排序
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/graydovee/netbouncer
+
+issues:
+  # 排除测试文件中的一些常见噪音
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0

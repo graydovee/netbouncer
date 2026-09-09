@@ -6,6 +6,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// IpNetFilter IP规则列表的筛选与分页参数
+type IpNetFilter struct {
+	GroupID uint   // 为 0 时不过滤
+	Action  string // 为空时不过滤
+	Search  string // 按 ip_net 模糊匹配，为空时不过滤
+	Offset  int
+	Limit   int // 为 0 时表示不分页
+}
+
 // IpNetStore 处理 IpNet 表的数据库操作
 type IpNetStore struct {
 	db *gorm.DB
@@ -38,24 +47,16 @@ func (s *IpNetStore) DeleteByID(id uint) error {
 	return s.db.Delete(&IpNet{}, id).Error
 }
 
-// ExistsByIpNetAndAction 检查指定IP网络和操作是否存在
-func (s *IpNetStore) ExistsByIpNetAndAction(ipnet string, action string) bool {
-	var count int64
-	s.db.Model(&IpNet{}).Where("ip_net = ? AND action = ?", ipnet, action).Count(&count)
-	return count > 0
+// DeleteByIDs 根据ID列表批量删除，返回实际删除的条数
+func (s *IpNetStore) DeleteByIDs(ids []uint) (int64, error) {
+	result := s.db.Where("id IN ?", ids).Delete(&IpNet{})
+	return result.RowsAffected, result.Error
 }
 
 // ExistsByIpNet 检查指定IP网络是否存在
 func (s *IpNetStore) ExistsByIpNet(ipnet string) bool {
 	var count int64
 	s.db.Model(&IpNet{}).Where("ip_net = ?", ipnet).Count(&count)
-	return count > 0
-}
-
-// ExistsById 检查指定ID是否存在
-func (s *IpNetStore) ExistsById(id uint) bool {
-	var count int64
-	s.db.Model(&IpNet{}).Where("id = ?", id).Count(&count)
 	return count > 0
 }
 
@@ -66,6 +67,15 @@ func (s *IpNetStore) FindByID(id uint) (*IpNet, error) {
 		return nil, err
 	}
 	return &model, nil
+}
+
+// FindByIDs 根据ID列表查找IP网络记录
+func (s *IpNetStore) FindByIDs(ids []uint) ([]IpNet, error) {
+	var models []IpNet
+	if err := s.db.Where("id IN ?", ids).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	return models, nil
 }
 
 // FindByIpNet 根据IP网络地址查找IP网络记录
@@ -84,6 +94,38 @@ func (s *IpNetStore) FindAll() ([]IpNet, error) {
 		return nil, err
 	}
 	return models, nil
+}
+
+// FindByFilter 按条件分页查询IP网络记录，返回记录与总数
+func (s *IpNetStore) FindByFilter(filter IpNetFilter) ([]IpNet, int64, error) {
+	query := s.db.Model(&IpNet{})
+	if filter.GroupID != 0 {
+		query = query.Where("group_id = ?", filter.GroupID)
+	}
+	if filter.Action != "" {
+		query = query.Where("action = ?", filter.Action)
+	}
+	if filter.Search != "" {
+		query = query.Where("ip_net LIKE ?", "%"+filter.Search+"%")
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if filter.Limit > 0 {
+		query = query.Limit(filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query = query.Offset(filter.Offset)
+	}
+
+	var models []IpNet
+	if err := query.Order("id ASC").Find(&models).Error; err != nil {
+		return nil, 0, err
+	}
+	return models, total, nil
 }
 
 // FindByAction 根据操作类型查找IP网络记录
@@ -112,16 +154,6 @@ func (s *IpNetStore) UpdateAction(ipNetID uint, action string) error {
 // UpdateGroupID 更新IP网络记录的组ID
 func (s *IpNetStore) UpdateGroupID(ipNetID uint, groupID uint) error {
 	return s.db.Model(&IpNet{}).Where("id = ?", ipNetID).Update("group_id", groupID).Error
-}
-
-// UpdateGroupIDByIPNet 根据IP网络地址更新组ID
-func (s *IpNetStore) UpdateGroupIDByIPNet(ipnet string, groupID uint) error {
-	return s.db.Model(&IpNet{}).Where("ip_net = ?", ipnet).Update("group_id", groupID).Error
-}
-
-// RemoveFromGroup 将IP网络记录从组中移除
-func (s *IpNetStore) RemoveFromGroup(ipnet string) error {
-	return s.db.Model(&IpNet{}).Where("ip_net = ?", ipnet).Update("group_id", nil).Error
 }
 
 // BatchCreate 批量创建IP网络记录，使用事务确保整体成功或失败

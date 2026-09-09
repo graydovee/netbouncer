@@ -7,14 +7,14 @@ CURRENT_COMMIT_HAS_TAG := $(shell git describe --exact-match --tags HEAD 2>/dev/
 # 根据规则设置DOCKER_TAG
 DOCKER_TAG := $(if $(filter yes,$(CURRENT_COMMIT_HAS_TAG)),$(GIT_TAG),$(PREV_TAG)-$(GIT_COMMIT))
 
-.PHONY: all build run clean tidy docker-build docker-release build-web clean-web clean-go web-dev
+.PHONY: all build-go build-go-embed run run-mock clean tidy docker-build docker-release build-web clean-web clean-go web-dev test
 
-all: build-web build-go
+all: build-web build-go-embed
 
 tidy:
 	go mod tidy
 
-# 构建React前端项目
+# 构建React前端项目，产物复制到 web/（默认构建运行时读取）
 build-web:
 	@echo "Building React frontend..."
 	cd website && npm ci
@@ -30,14 +30,24 @@ web-dev:
 	@echo "Backend URL: $(or $(VITE_BACKEND_URL),http://localhost:8080)"
 	cd website && VITE_BACKEND_URL=$(or $(VITE_BACKEND_URL),http://localhost:8080) npm run dev
 
+# 本地构建（不嵌入前端，运行时需与 web/ 目录同在）
 build-go: tidy
 	CGO_ENABLED=1 go build -o bin/netbouncer main.go
 
-debug:
-	./bin/netbouncer --debug
+# 构建内嵌前端的单文件二进制（需先 build-web）
+build-go-embed: tidy build-web
+	CGO_ENABLED=1 go build -tags embed -o bin/netbouncer main.go
 
+# 使用配置文件运行
 run:
 	./bin/netbouncer -c config.yaml
+
+# 本地调试（mock 防火墙，无需 root/CAP_NET_ADMIN）
+run-mock:
+	./bin/netbouncer -f mock
+
+test:
+	CGO_ENABLED=1 go test ./...
 
 clean-web:
 	rm -rf web

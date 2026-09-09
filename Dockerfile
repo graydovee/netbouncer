@@ -32,10 +32,13 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
-# 构建应用
+# 复制前端构建产物，嵌入二进制实现单文件部署
+COPY --from=frontend-builder /app/frontend/dist ./pkg/web/dist
+
+# 构建应用（内嵌前端）
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-RUN CGO_ENABLED=1 GOOS=linux go build -o netbouncer main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -tags embed -o netbouncer main.go
 
 # 运行阶段
 FROM ubuntu:22.04
@@ -49,13 +52,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 从构建阶段复制二进制文件
+# 从构建阶段复制二进制文件（前端已嵌入）
 COPY --from=builder /app/netbouncer .
-# 从frontend-builder复制构建好的前端文件
-COPY --from=frontend-builder /app/frontend/dist ./web
-
-# 设置环境变量
-ENV GIN_MODE=release
 
 # 暴露端口
 EXPOSE 8080

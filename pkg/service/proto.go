@@ -31,4 +31,5 @@ type IpGroup struct {
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 	IsDefault   bool   `json:"is_default"`
+	IPCount     int64  `json:"ip_count"` // 组内IP规则数量
 }

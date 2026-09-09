@@ -6,10 +6,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/graydovee/netbouncer/pkg/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/graydovee/netbouncer/pkg/config"
 )
 
 // SlogLogger 实现GORM的logger接口，使用Go的slog
@@ -81,61 +82,31 @@ func (l *SlogLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql 
 	}
 }
 
-// NewDatabase 根据配置创建数据库连接
+// NewDatabase 根据配置创建数据库连接（当前仅支持 sqlite）
 func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
-	var dsn string
+	if cfg.Driver != "sqlite" {
+		return nil, fmt.Errorf("数据库驱动 %q 暂未实现，当前仅支持 sqlite", cfg.Driver)
+	}
 
-	// 如果提供了DSN，直接使用
-	if cfg.DSN != "" {
-		dsn = cfg.DSN
-	} else {
-		// 根据驱动类型构建DSN
-		switch cfg.Driver {
-		case "sqlite":
-			if cfg.Database == "" {
-				cfg.Database = "netbouncer.db"
-			}
-			dsn = cfg.Database
-		case "mysql":
-			dsn = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
-		case "postgres":
-			dsn = fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable TimeZone=Asia/Shanghai",
-				cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.Database)
-		default:
-			return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)
+	dsn := cfg.DSN
+	if dsn == "" {
+		if cfg.Database == "" {
+			cfg.Database = "netbouncer.db"
 		}
+		dsn = cfg.Database
 	}
 
-	slog.Info("使用数据库", "dsn", dsn)
-
-	var dialector gorm.Dialector
-	switch cfg.Driver {
-	case "sqlite":
-		dialector = sqlite.Open(dsn)
-	case "mysql":
-		// 这里需要添加mysql驱动，暂时只支持sqlite
-		return nil, fmt.Errorf("mysql driver not implemented yet")
-	case "postgres":
-		// 这里需要添加postgres驱动，暂时只支持sqlite
-		return nil, fmt.Errorf("postgres driver not implemented yet")
-	default:
-		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Driver)
-	}
+	slog.Info("使用数据库", "driver", cfg.Driver, "file", dsn)
 
 	// 根据配置设置SQL日志级别
 	var logLevel slog.Level
 	switch cfg.LogLevel {
-	case "silent":
-		logLevel = slog.LevelError
-	case "error":
+	case "silent", "error":
 		logLevel = slog.LevelError
 	case "warn":
 		logLevel = slog.LevelWarn
-	case "info":
-		logLevel = slog.LevelInfo
 	default:
-		logLevel = slog.LevelInfo // 默认级别
+		logLevel = slog.LevelInfo
 	}
 
 	// 配置GORM，使用自定义的slog logger
@@ -143,7 +114,7 @@ func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 		Logger: NewSlogLogger(logLevel),
 	}
 
-	db, err := gorm.Open(dialector, gormConfig)
+	db, err := gorm.Open(sqlite.Open(dsn), gormConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}

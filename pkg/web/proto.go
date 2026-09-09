@@ -1,17 +1,11 @@
 package web
 
 // 通用响应结构体
-// code 遵循http code，错误用code区分，http status一般返回200
-// message为提示信息，data为数据内容
+// 成功时 HTTP 状态码为 200，body 中 code 为 200；
+// 失败时 HTTP 状态码与 body 中 code 一致（400/401/404/409/500 等），
+// message 为提示信息，data 为数据内容。
 
 // Response 统一响应结构体
-// code: 200成功，其他为错误码
-// message: 提示信息
-// data: 返回数据
-
-// 通用请求结构体
-// 例如IP操作请求
-
 type Response struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -50,6 +44,29 @@ type ImportIPNetRequest struct {
 }
 
 type ImportIPNetResponse struct {
+	SuccessCount int `json:"success_count"`
+	FailedCount  int `json:"failed_count"`
+}
+
+// BatchDeleteIPNetRequest 批量删除IP规则请求
+type BatchDeleteIPNetRequest struct {
+	IDs []uint `json:"ids"`
+}
+
+// BatchUpdateIPNetActionRequest 批量修改IP规则动作请求
+type BatchUpdateIPNetActionRequest struct {
+	IDs    []uint `json:"ids"`
+	Action string `json:"action"`
+}
+
+// BatchUpdateIPNetGroupRequest 批量修改IP所属组请求
+type BatchUpdateIPNetGroupRequest struct {
+	IDs     []uint `json:"ids"`
+	GroupId uint   `json:"group_id"`
+}
+
+// BatchOperationResponse 批量操作结果
+type BatchOperationResponse struct {
 	SuccessCount int `json:"success_count"`
 	FailedCount  int `json:"failed_count"`
 }

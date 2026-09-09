@@ -6,11 +6,13 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+
 	"github.com/graydovee/netbouncer/pkg/config"
 )
 
@@ -45,7 +47,8 @@ type Monitor struct {
 	mutex     sync.RWMutex
 	handle    *pcap.Handle
 	localIPs  map[string]bool
-	isRunning bool
+	isRunning atomic.Bool
+	stopOnce  sync.Once
 	stopChan  chan bool
 	device    string
 
@@ -121,22 +124,6 @@ func NewMonitor(cfg *config.MonitorConfig) (*Monitor, error) {
 	return monitor, nil
 }
 
-// SetWindowSize 设置滑动窗口大小
-func (m *Monitor) SetWindowSize(size time.Duration) {
-	if size <= 0 {
-		size = 30 * time.Second // 默认30秒
-	}
-	m.windowSize = size
-}
-
-// SetConnectionTimeout 设置连接超时时间
-func (m *Monitor) SetConnectionTimeout(timeout time.Duration) {
-	if timeout <= 0 {
-		timeout = 24 * time.Hour
-	}
-	m.connectionTimeout = timeout
-}
-
 // getLocalIPs 获取本地IP地址列表
 func (m *Monitor) getLocalIPs() error {
 	addrs, err := net.InterfaceAddrs()
@@ -174,22 +161,24 @@ func (m *Monitor) StartCleanupRoutine() {
 
 // Start 开始监控
 func (m *Monitor) Start() error {
-	if m.isRunning {
+	if !m.isRunning.CompareAndSwap(false, true) {
 		return fmt.Errorf("monitor is already running")
 	}
 
 	// 打开网络接口进行捕获
-	handle, err := pcap.OpenLive(m.device, 1600, true, pcap.BlockForever)
+	// snaplen 取最大值，确保统计字节数时能读到完整包
+	handle, err := pcap.OpenLive(m.device, 65535, true, pcap.BlockForever)
 	if err != nil {
+		m.isRunning.Store(false)
 		return fmt.Errorf("failed to open device %s: %v", m.device, err)
 	}
 
 	m.handle = handle
-	m.isRunning = true
 
 	// 设置过滤器，只捕获TCP和UDP包
-	err = m.handle.SetBPFFilter("tcp or udp")
-	if err != nil {
+	if err := m.handle.SetBPFFilter("tcp or udp"); err != nil {
+		m.isRunning.Store(false)
+		handle.Close()
 		return fmt.Errorf("failed to set BPF filter: %v", err)
 	}
 
@@ -203,20 +192,18 @@ func (m *Monitor) Start() error {
 	return nil
 }
 
-// Stop 停止监控
+// Stop 停止监控，可安全地重复调用
 func (m *Monitor) Stop() {
-	if !m.isRunning {
-		return
-	}
+	m.stopOnce.Do(func() {
+		m.isRunning.Store(false)
+		close(m.stopChan)
 
-	m.isRunning = false
-	close(m.stopChan)
+		if m.handle != nil {
+			m.handle.Close()
+		}
 
-	if m.handle != nil {
-		m.handle.Close()
-	}
-
-	slog.Info("Network monitor stopped")
+		slog.Info("Network monitor stopped")
+	})
 }
 
 // capturePackets 捕获网络包
@@ -257,21 +244,21 @@ func (m *Monitor) processPacket(packet gopacket.Packet) {
 	if ipv4, ok := ipLayer.(*layers.IPv4); ok {
 		srcIP = ipv4.SrcIP.String()
 		dstIP = ipv4.DstIP.String()
-		// 使用整个数据包的长度，而不是IP层的长度
-		length = uint64(len(packet.Data()))
+		// 优先使用 IP 头中的总长度字段：snaplen 截断或 TCP 分段卸载时
+		// packet.Data() 会比真实包小，导致流量少算
+		length = uint64(ipv4.Length)
+		if length == 0 {
+			length = uint64(len(packet.Data()))
+		}
 	} else if ipv6, ok := ipLayer.(*layers.IPv6); ok {
-		// 处理IPv6
+		// 处理IPv6，Length 字段不含 40 字节固定头部
 		srcIP = ipv6.SrcIP.String()
 		dstIP = ipv6.DstIP.String()
-		// 使用整个数据包的长度
-		length = uint64(len(packet.Data()))
+		length = uint64(ipv6.Length) + 40
+		if length <= 40 {
+			length = uint64(len(packet.Data()))
+		}
 	} else {
-		return
-	}
-
-	// 验证包长度合理性
-	if length == 0 || length > 65535 {
-		// 跳过无效长度的包
 		return
 	}
 
@@ -379,20 +366,6 @@ func (m *Monitor) cleanupInactiveConnections() {
 	}
 }
 
-// GetAllStats 获取所有IP的流量统计
-func (m *Monitor) GetAllStats() map[string]*TrafficStats {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	// 创建副本以避免并发访问问题
-	result := make(map[string]*TrafficStats)
-	for ip, stats := range m.stats {
-		result[ip] = stats.toTrafficStats()
-	}
-
-	return result
-}
-
 // GetStats 获取过滤后的IP流量统计
 func (m *Monitor) GetStats() map[string]*TrafficStats {
 	m.mutex.RLock()
@@ -428,46 +401,6 @@ func isIPExcluded(ipStr string, excludedSubnets []*net.IPNet) bool {
 		}
 	}
 	return false
-}
-
-// ClearStats 清空统计信息
-func (m *Monitor) ClearStats() {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.stats = make(map[string]*internalTrafficStats)
-}
-
-// GetDebugInfo 获取调试信息
-func (m *Monitor) GetDebugInfo() map[string]interface{} {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	debugInfo := make(map[string]interface{})
-	debugInfo["total_connections"] = len(m.stats)
-	debugInfo["local_ips"] = m.localIPs
-	debugInfo["device"] = m.device
-	debugInfo["is_running"] = m.isRunning
-	debugInfo["window_size"] = m.windowSize.String()
-	debugInfo["connection_timeout"] = m.connectionTimeout.String()
-
-	// 统计总流量
-	var totalBytesSent, totalBytesRecv uint64
-	var totalPacketsSent, totalPacketsRecv uint64
-	for _, stats := range m.stats {
-		totalBytesSent += stats.bytesSent
-		totalBytesRecv += stats.bytesRecv
-		totalPacketsSent += stats.packetsSent
-		totalPacketsRecv += stats.packetsRecv
-	}
-
-	debugInfo["total_bytes_sent"] = totalBytesSent
-	debugInfo["total_bytes_recv"] = totalBytesRecv
-	debugInfo["total_packets_sent"] = totalPacketsSent
-	debugInfo["total_packets_recv"] = totalPacketsRecv
-	debugInfo["total_bytes"] = totalBytesSent + totalBytesRecv
-
-	return debugInfo
 }
 
 // trafficWindow 流量滑动窗口

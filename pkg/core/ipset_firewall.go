@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"slices"
-	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
@@ -25,67 +23,43 @@ func (i *IpSetFirewallCore) InitRules() error {
 	slog.Info("初始化ipset防火墙", "ipset", i.ipset, "chain", i.chain)
 
 	// 创建ipset
-	err := i.createIpSet()
-	if err != nil {
+	if err := i.createIpSets(); err != nil {
 		return fmt.Errorf("创建ipset失败: %w", err)
 	}
 
 	// 设置iptables规则
-	err = i.setupIptables()
-	if err != nil {
+	if err := i.setupIptables(); err != nil {
 		return fmt.Errorf("设置iptables规则失败: %w", err)
 	}
 
 	return nil
 }
 
-func (i *IpSetFirewallCore) createIpSet() error {
-	// 初始化ipset名称
+// ensureIpSet 确保指定名称的 hash:net ipset 存在，已存在则清空
+func ensureIpSet(name string) error {
+	if _, err := netlink.IpsetList(name); err == nil {
+		slog.Info("清空已存在的ipset", "ipset", name, "cmd", "ipset flush "+name)
+		if err := netlink.IpsetFlush(name); err != nil {
+			return fmt.Errorf("清空ipset失败: %w", err)
+		}
+		return nil
+	}
+
+	slog.Info("创建新的ipset", "ipset", name, "cmd", "ipset create "+name+" hash:net family inet hashsize 1024 maxelem 65536")
+	if err := netlink.IpsetCreate(name, "hash:net", netlink.IpsetCreateOptions{Replace: true}); err != nil {
+		return fmt.Errorf("创建ipset失败: %w", err)
+	}
+	return nil
+}
+
+func (i *IpSetFirewallCore) createIpSets() error {
 	i.banIpSet = i.ipset + "_ban"
 	i.allowIpSet = i.ipset + "_allow"
 
-	// 创建禁止IP的ipset
-	_, err := netlink.IpsetList(i.banIpSet)
-	if err == nil {
-		// ipset已存在，清空它
-		slog.Info("清空已存在的禁止ipset", "ipset", i.banIpSet, "cmd", "ipset flush "+i.banIpSet)
-		err = netlink.IpsetFlush(i.banIpSet)
-		if err != nil {
-			return fmt.Errorf("清空禁止ipset失败: %w", err)
-		}
-	} else {
-		// 创建新的ipset
-		slog.Info("创建新的禁止ipset", "ipset", i.banIpSet, "cmd", "ipset create "+i.banIpSet+" hash:net family inet hashsize 1024 maxelem 65536")
-		options := netlink.IpsetCreateOptions{
-			Replace: true,
-		}
-		err = netlink.IpsetCreate(i.banIpSet, "hash:net", options)
-		if err != nil {
-			return fmt.Errorf("创建禁止ipset失败: %w", err)
-		}
+	if err := ensureIpSet(i.banIpSet); err != nil {
+		return err
 	}
-
-	// 创建允许IP的ipset
-	_, err = netlink.IpsetList(i.allowIpSet)
-	if err == nil {
-		// ipset已存在，清空它
-		slog.Info("清空已存在的允许ipset", "ipset", i.allowIpSet, "cmd", "ipset flush "+i.allowIpSet)
-		err = netlink.IpsetFlush(i.allowIpSet)
-		if err != nil {
-			return fmt.Errorf("清空允许ipset失败: %w", err)
-		}
-	} else {
-		// 创建新的ipset
-		slog.Info("创建新的允许ipset", "ipset", i.allowIpSet, "cmd", "ipset create "+i.allowIpSet+" hash:net family inet hashsize 1024 maxelem 65536")
-		options := netlink.IpsetCreateOptions{
-			Replace: true,
-		}
-		err = netlink.IpsetCreate(i.allowIpSet, "hash:net", options)
-		if err != nil {
-			return fmt.Errorf("创建允许ipset失败: %w", err)
-		}
-	}
-	return nil
+	return ensureIpSet(i.allowIpSet)
 }
 
 func (i *IpSetFirewallCore) setupIptables() error {
@@ -96,47 +70,21 @@ func (i *IpSetFirewallCore) setupIptables() error {
 	}
 	i.ipt = ipt
 
-	// 检查链是否存在，存在则清空，不存在则新建
-	chains, err := ipt.ListChains("filter")
-	if err != nil {
+	if err := ensureChainAndJump(ipt, i.chain); err != nil {
 		return err
-	}
-	if slices.Contains(chains, i.chain) {
-		slog.Info("清空链中的所有规则", "cmd", "iptables -F "+i.chain)
-		_ = ipt.ClearChain("filter", i.chain)
-	} else {
-		slog.Info("创建新的自定义链", "cmd", "iptables -N "+i.chain)
-		_ = ipt.NewChain("filter", i.chain)
-	}
-
-	// 检查 INPUT 链是否已经包含对自定义链的引用
-	rules, err := ipt.List("filter", "INPUT")
-	if err != nil {
-		return err
-	}
-
-	// 查找是否已存在指向自定义链的规则
-	ruleExists := slices.Contains(rules, "-j "+i.chain)
-
-	// 只有在规则不存在时才插入
-	if !ruleExists {
-		slog.Info("初始化自定义链", "cmd", "iptables -I INPUT 1 -j "+i.chain)
-		_ = ipt.Insert("filter", "INPUT", 1, "-j", i.chain)
 	}
 
 	// 添加允许IP的规则到自定义链（优先级最高）
 	// iptables -A <chain> -m set --match-set <allow_ipset> src -j ACCEPT
 	slog.Info("添加允许ipset规则到iptables", "cmd", "iptables -A "+i.chain+" -m set --match-set "+i.allowIpSet+" src -j ACCEPT")
-	err = ipt.AppendUnique("filter", i.chain, "-m", "set", "--match-set", i.allowIpSet, "src", "-j", "ACCEPT")
-	if err != nil {
+	if err := ipt.AppendUnique("filter", i.chain, "-m", "set", "--match-set", i.allowIpSet, "src", "-j", "ACCEPT"); err != nil {
 		return fmt.Errorf("添加允许ipset规则到iptables失败: %w", err)
 	}
 
 	// 添加禁止IP的规则到自定义链（优先级较低）
 	// iptables -A <chain> -m set --match-set <ban_ipset> src -j DROP
 	slog.Info("添加禁止ipset规则到iptables", "cmd", "iptables -A "+i.chain+" -m set --match-set "+i.banIpSet+" src -j DROP")
-	err = ipt.AppendUnique("filter", i.chain, "-m", "set", "--match-set", i.banIpSet, "src", "-j", "DROP")
-	if err != nil {
+	if err := ipt.AppendUnique("filter", i.chain, "-m", "set", "--match-set", i.banIpSet, "src", "-j", "DROP"); err != nil {
 		return fmt.Errorf("添加禁止ipset规则到iptables失败: %w", err)
 	}
 
@@ -160,161 +108,131 @@ func (i *IpSetFirewallCore) RevertAllow(ipOrCidr string) error {
 }
 
 func (i *IpSetFirewallCore) CleanupIpNetRules(ipOrCidr string) error {
-	// 先尝试从禁止ipset中删除
-
+	// 先尝试从禁止ipset中删除，再尝试从允许ipset中删除；元素不存在视为成功
 	var errs []error
-	err := i.removeFromBanRules(ipOrCidr)
-	if err != nil {
-		// 如果IP不存在，则认为成功
-		if !strings.Contains(err.Error(), "not found") {
-			errs = append(errs, err)
-		}
+	if err := i.removeFromBanRules(ipOrCidr); err != nil && !isNotExistErr(err) {
+		errs = append(errs, err)
 	}
-
-	// 再尝试从允许ipset中删除
-	err = i.removeFromAllowRules(ipOrCidr)
-	if err != nil {
-		// 如果IP不存在，则认为成功
-		if !strings.Contains(err.Error(), "not found") {
-			errs = append(errs, err)
-		}
+	if err := i.removeFromAllowRules(ipOrCidr); err != nil && !isNotExistErr(err) {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-func (i *IpSetFirewallCore) addToBanRules(ipOrCidr string) error {
-	// 检查是否为特殊地址 0.0.0.0/0
-	if ipOrCidr == "0.0.0.0/0" {
-		slog.Info("检测到特殊地址0.0.0.0/0，使用iptables规则", "ip", ipOrCidr, "cmd", "iptables -A "+i.chain+" -s "+ipOrCidr+" -j DROP")
-		err := i.ipt.AppendUnique("filter", i.chain, "-s", ipOrCidr, "-j", "DROP")
-		if err != nil {
+// addSpecialRule 处理特殊地址 0.0.0.0/0：ipset 无法表达全零网络，改走 iptables 规则
+func (i *IpSetFirewallCore) addSpecialRule(ipOrCidr string, action string) error {
+	if action == "ACCEPT" {
+		slog.Info("检测到特殊地址0.0.0.0/0，使用iptables规则", "ip", ipOrCidr, "cmd", "iptables -I "+i.chain+" 1 -s "+ipOrCidr+" -j ACCEPT")
+		if err := i.ipt.Insert("filter", i.chain, 1, "-s", ipOrCidr, "-j", "ACCEPT"); err != nil {
 			return fmt.Errorf("添加特殊地址iptables规则失败: %w", err)
 		}
 		return nil
 	}
 
-	// 解析IP或CIDR
+	slog.Info("检测到特殊地址0.0.0.0/0，使用iptables规则", "ip", ipOrCidr, "cmd", "iptables -A "+i.chain+" -s "+ipOrCidr+" -j DROP")
+	if err := i.ipt.AppendUnique("filter", i.chain, "-s", ipOrCidr, "-j", "DROP"); err != nil {
+		return fmt.Errorf("添加特殊地址iptables规则失败: %w", err)
+	}
+	return nil
+}
+
+// removeSpecialRule 删除特殊地址 0.0.0.0/0 对应的 iptables 规则
+func (i *IpSetFirewallCore) removeSpecialRule(ipOrCidr string, action string) error {
+	slog.Info("检测到特殊地址0.0.0.0/0，删除iptables规则", "ip", ipOrCidr, "cmd", "iptables -D "+i.chain+" -s "+ipOrCidr+" -j "+action)
+	if err := i.ipt.Delete("filter", i.chain, "-s", ipOrCidr, "-j", action); err != nil {
+		// 规则不存在视为成功（幂等操作）
+		if isNotExistErr(err) {
+			slog.Info("特殊地址iptables规则不存在", "ip", ipOrCidr)
+			return nil
+		}
+		return fmt.Errorf("删除特殊地址iptables规则失败: %w", err)
+	}
+	return nil
+}
+
+func (i *IpSetFirewallCore) addToBanRules(ipOrCidr string) error {
+	if ipOrCidr == "0.0.0.0/0" {
+		return i.addSpecialRule(ipOrCidr, "DROP")
+	}
+
 	entry, err := buildIpSetEntry(ipOrCidr)
 	if err != nil {
 		return err
 	}
 
-	slog.Info("添加到禁止ipset", "ip", entry.IP, "cidr", entry.CIDR, "cmd", "ipset add "+i.banIpSet+" "+ipOrCidr)
-	err = netlink.IpsetAdd(i.banIpSet, entry)
-	// 如果ipset中已存在，则返回成功
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		return nil
-	}
-	if err != nil {
+	slog.Info("添加到禁止ipset", "ip", entry.IP.String(), "cidr", entry.CIDR, "cmd", "ipset add "+i.banIpSet+" "+ipOrCidr)
+	if err := netlink.IpsetAdd(i.banIpSet, entry); err != nil {
+		// 已存在视为成功
+		if isAlreadyExistsErr(err) {
+			return nil
+		}
 		return fmt.Errorf("添加到禁止ipset失败: %w", err)
 	}
-
 	return nil
 }
 
 func (i *IpSetFirewallCore) removeFromBanRules(ipOrCidr string) error {
-	// 检查是否为特殊地址 0.0.0.0/0
 	if ipOrCidr == "0.0.0.0/0" {
-		slog.Info("检测到特殊地址0.0.0.0/0，删除iptables规则", "ip", ipOrCidr, "cmd", "iptables -D "+i.chain+" -s "+ipOrCidr+" -j DROP")
-		err := i.ipt.Delete("filter", i.chain, "-s", ipOrCidr, "-j", "DROP")
-		if err != nil {
-			// 如果规则不存在，则返回成功（幂等操作）
-			if strings.Contains(err.Error(), "Bad rule") {
-				slog.Info("特殊地址iptables规则不存在", "ip", ipOrCidr)
-				return nil
-			}
-			return fmt.Errorf("删除特殊地址iptables规则失败: %w", err)
-		}
-		return nil
+		return i.removeSpecialRule(ipOrCidr, "DROP")
 	}
 
-	// 解析IP或CIDR
 	entry, err := buildIpSetEntry(ipOrCidr)
 	if err != nil {
 		return err
 	}
 
-	slog.Info("从禁止ipset中删除", "ip", entry.IP, "cidr", entry.CIDR, "cmd", "ipset del "+i.banIpSet+" "+ipOrCidr)
-	err = netlink.IpsetDel(i.banIpSet, entry)
-	// 如果ipset中不存在，则返回成功（幂等操作）
-	if err != nil {
-		errStr := err.Error()
-		// 检查各种可能的"不存在"错误
-		if strings.Contains(errStr, "exis") { // 处理截断的错误信息
-			slog.Info("IP不存在于禁止ipset中", "ip", ipOrCidr, "error", errStr)
+	slog.Info("从禁止ipset中删除", "ip", entry.IP.String(), "cidr", entry.CIDR, "cmd", "ipset del "+i.banIpSet+" "+ipOrCidr)
+	if err := netlink.IpsetDel(i.banIpSet, entry); err != nil {
+		// 不存在视为成功（幂等操作）
+		if isNotExistErr(err) {
+			slog.Info("IP不存在于禁止ipset中", "ip", ipOrCidr)
 			return nil
 		}
 		return fmt.Errorf("从禁止ipset中删除失败: %w", err)
 	}
-
 	return nil
 }
 
 func (i *IpSetFirewallCore) addToAllowRules(ipOrCidr string) error {
-	// 检查是否为特殊地址 0.0.0.0/0
 	if ipOrCidr == "0.0.0.0/0" {
-		slog.Info("检测到特殊地址0.0.0.0/0，使用iptables规则", "ip", ipOrCidr, "cmd", "iptables -I "+i.chain+" 1 -s "+ipOrCidr+" -j ACCEPT")
-		err := i.ipt.Insert("filter", i.chain, 1, "-s", ipOrCidr, "-j", "ACCEPT")
-		if err != nil {
-			return fmt.Errorf("添加特殊地址iptables规则失败: %w", err)
-		}
-		return nil
+		return i.addSpecialRule(ipOrCidr, "ACCEPT")
 	}
 
-	// 解析IP或CIDR
 	entry, err := buildIpSetEntry(ipOrCidr)
 	if err != nil {
 		return err
 	}
 
-	slog.Info("添加到允许ipset", "ip", entry.IP, "cidr", entry.CIDR, "cmd", "ipset add "+i.allowIpSet+" "+ipOrCidr)
-	err = netlink.IpsetAdd(i.allowIpSet, entry)
-	// 如果ipset中已存在，则返回成功
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		return nil
-	}
-	if err != nil {
+	slog.Info("添加到允许ipset", "ip", entry.IP.String(), "cidr", entry.CIDR, "cmd", "ipset add "+i.allowIpSet+" "+ipOrCidr)
+	if err := netlink.IpsetAdd(i.allowIpSet, entry); err != nil {
+		// 已存在视为成功
+		if isAlreadyExistsErr(err) {
+			return nil
+		}
 		return fmt.Errorf("添加到允许ipset失败: %w", err)
 	}
-
 	return nil
 }
 
 func (i *IpSetFirewallCore) removeFromAllowRules(ipOrCidr string) error {
-	// 检查是否为特殊地址 0.0.0.0/0
 	if ipOrCidr == "0.0.0.0/0" {
-		slog.Info("检测到特殊地址0.0.0.0/0，删除iptables规则", "ip", ipOrCidr, "cmd", "iptables -D "+i.chain+" -s "+ipOrCidr+" -j ACCEPT")
-		err := i.ipt.Delete("filter", i.chain, "-s", ipOrCidr, "-j", "ACCEPT")
-		if err != nil {
-			// 如果规则不存在，则返回成功（幂等操作）
-			if strings.Contains(err.Error(), "Bad rule") {
-				slog.Info("特殊地址iptables规则不存在", "ip", ipOrCidr)
-				return nil
-			}
-			return fmt.Errorf("删除特殊地址iptables规则失败: %w", err)
-		}
-		return nil
+		return i.removeSpecialRule(ipOrCidr, "ACCEPT")
 	}
 
-	// 解析IP或CIDR
 	entry, err := buildIpSetEntry(ipOrCidr)
 	if err != nil {
 		return err
 	}
 
-	slog.Info("从允许ipset中删除", "ip", entry.IP, "cidr", entry.CIDR, "cmd", "ipset del "+i.allowIpSet+" "+ipOrCidr)
-	err = netlink.IpsetDel(i.allowIpSet, entry)
-	// 如果ipset中不存在，则返回成功（幂等操作）
-	if err != nil {
-		errStr := err.Error()
-		// 检查各种可能的"不存在"错误
-		if strings.Contains(errStr, "exis") { // 处理截断的错误信息
-			slog.Info("IP不存在于允许ipset中", "ip", ipOrCidr, "error", errStr)
+	slog.Info("从允许ipset中删除", "ip", entry.IP.String(), "cidr", entry.CIDR, "cmd", "ipset del "+i.allowIpSet+" "+ipOrCidr)
+	if err := netlink.IpsetDel(i.allowIpSet, entry); err != nil {
+		// 不存在视为成功（幂等操作）
+		if isNotExistErr(err) {
+			slog.Info("IP不存在于允许ipset中", "ip", ipOrCidr)
 			return nil
 		}
 		return fmt.Errorf("从允许ipset中删除失败: %w", err)
 	}
-
 	return nil
 }
 
@@ -325,55 +243,26 @@ func (i *IpSetFirewallCore) CleanupRules() error {
 	if i.ipt == nil {
 		ipt, err := iptables.New()
 		if err != nil {
-			slog.Error("创建iptables实例失败", "error", err)
-			return err
+			return fmt.Errorf("创建iptables实例失败: %w", err)
 		}
 		i.ipt = ipt
 	}
 
-	// 从INPUT链移除所有指向自定义链的规则
-	for {
-		err := i.ipt.Delete("filter", "INPUT", "-j", i.chain)
-		if err != nil {
-			break
+	if err := removeChainJumpAndChain(i.ipt, i.chain); err != nil {
+		slog.Error("清理iptables链失败", "error", err)
+	}
+
+	// 清空并删除两个ipset
+	for _, name := range []string{i.banIpSet, i.allowIpSet} {
+		slog.Info("清空ipset", "ipset", name, "cmd", "ipset flush "+name)
+		if err := netlink.IpsetFlush(name); err != nil {
+			slog.Error("清空ipset失败", "ipset", name, "error", err)
 		}
-		slog.Info("清除自定义链的规则", "cmd", "iptables -D INPUT -j "+i.chain)
-	}
 
-	// 清空自定义链中的所有规则
-	slog.Info("清空自定义链中的所有规则", "cmd", "iptables -F "+i.chain)
-	_ = i.ipt.ClearChain("filter", i.chain)
-
-	// 删除自定义链
-	slog.Info("删除自定义链", "cmd", "iptables -X "+i.chain)
-	_ = i.ipt.DeleteChain("filter", i.chain)
-
-	// 清空禁止ipset
-	slog.Info("清空禁止ipset", "ipset", i.banIpSet, "cmd", "ipset flush "+i.banIpSet)
-	err := netlink.IpsetFlush(i.banIpSet)
-	if err != nil {
-		slog.Error("清空禁止ipset失败", "error", err)
-	}
-
-	// 删除禁止ipset
-	slog.Info("删除禁止ipset", "ipset", i.banIpSet, "cmd", "ipset destroy "+i.banIpSet)
-	err = netlink.IpsetDestroy(i.banIpSet)
-	if err != nil {
-		slog.Error("删除禁止ipset失败", "error", err)
-	}
-
-	// 清空允许ipset
-	slog.Info("清空允许ipset", "ipset", i.allowIpSet, "cmd", "ipset flush "+i.allowIpSet)
-	err = netlink.IpsetFlush(i.allowIpSet)
-	if err != nil {
-		slog.Error("清空允许ipset失败", "error", err)
-	}
-
-	// 删除允许ipset
-	slog.Info("删除允许ipset", "ipset", i.allowIpSet, "cmd", "ipset destroy "+i.allowIpSet)
-	err = netlink.IpsetDestroy(i.allowIpSet)
-	if err != nil {
-		slog.Error("删除允许ipset失败", "error", err)
+		slog.Info("删除ipset", "ipset", name, "cmd", "ipset destroy "+name)
+		if err := netlink.IpsetDestroy(name); err != nil {
+			slog.Error("删除ipset失败", "ipset", name, "error", err)
+		}
 	}
 
 	return nil
@@ -400,7 +289,6 @@ func buildIpSetEntry(ipOrCidr string) (*netlink.IPSetEntry, error) {
 	ones, _ := ipNet.Mask.Size()
 	cidr := uint8(ones)
 	if cidr == 0 {
-		cidr = 0
 		ipNet.IP = net.IPv4zero
 	}
 

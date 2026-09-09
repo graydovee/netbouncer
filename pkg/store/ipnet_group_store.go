@@ -1,6 +1,9 @@
 package store
 
 import (
+	"errors"
+	"time"
+
 	"gorm.io/gorm"
 )
 
@@ -38,15 +41,6 @@ func (s *IpNetGroupStore) FindByID(id uint) (*IpNetGroup, error) {
 	return &group, nil
 }
 
-// FindByIDs 根据ID列表查找IP网络组
-func (s *IpNetGroupStore) FindByIDs(ids ...uint) ([]IpNetGroup, error) {
-	var groups []IpNetGroup
-	if err := s.db.Where("id IN (?)", ids).Find(&groups).Error; err != nil {
-		return nil, err
-	}
-	return groups, nil
-}
-
 // FindByName 根据名称查找IP网络组
 func (s *IpNetGroupStore) FindByName(name string) (*IpNetGroup, error) {
 	var group IpNetGroup
@@ -54,6 +48,13 @@ func (s *IpNetGroupStore) FindByName(name string) (*IpNetGroup, error) {
 		return nil, err
 	}
 	return &group, nil
+}
+
+// FindByNameExists 检查指定名称的组是否存在
+func (s *IpNetGroupStore) FindByNameExists(name string) bool {
+	var count int64
+	s.db.Model(&IpNetGroup{}).Where("name = ?", name).Count(&count)
+	return count > 0
 }
 
 // FindDefault 查找默认组
@@ -74,19 +75,17 @@ func (s *IpNetGroupStore) FindAll() ([]IpNetGroup, error) {
 	return groups, nil
 }
 
-// Update 更新IP网络组信息
+// Update 更新IP网络组信息（只更新名称与描述，不覆盖其他字段）
 func (s *IpNetGroupStore) Update(id uint, name string, description string) (*IpNetGroup, error) {
-	group := IpNetGroup{
-		ID:          id,
-		Name:        name,
-		Description: description,
+	updates := map[string]any{
+		"name":        name,
+		"description": description,
+		"updated_at":  time.Now(),
 	}
-
-	if err := s.db.Save(&group).Error; err != nil {
+	if err := s.db.Model(&IpNetGroup{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return nil, err
 	}
-
-	return &group, nil
+	return s.FindByID(id)
 }
 
 // DeleteByID 根据ID删除IP网络组
@@ -94,12 +93,32 @@ func (s *IpNetGroupStore) DeleteByID(id uint) error {
 	return s.db.Delete(&IpNetGroup{}, id).Error
 }
 
+// CountByGroupID 统计每个组下的IP数量，返回 groupID -> count
+func (s *IpNetGroupStore) CountByGroupID() (map[uint]int64, error) {
+	var rows []struct {
+		GroupID uint  `gorm:"column:group_id"`
+		Count   int64 `gorm:"column:cnt"`
+	}
+	if err := s.db.Model(&IpNet{}).
+		Select("group_id, COUNT(*) AS cnt").
+		Group("group_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	counts := make(map[uint]int64, len(rows))
+	for _, row := range rows {
+		counts[row.GroupID] = row.Count
+	}
+	return counts, nil
+}
+
 // SetDefault 设置指定组为默认组
 func (s *IpNetGroupStore) SetDefault(groupID uint) error {
 	// 事务：1. 将所有组设置为非默认 2. 设置新的默认组
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// 先将所有组设置为非默认
-		if err := tx.Model(&IpNetGroup{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil && err != gorm.ErrRecordNotFound {
+		if err := tx.Model(&IpNetGroup{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 

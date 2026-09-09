@@ -14,3 +14,5 @@ __debug_bin*
 
 .claude
 CLAUDE.md
+# ZCode 会话本地目录
+.zcode/

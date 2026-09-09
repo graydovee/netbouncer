@@ -1,0 +1,4 @@
+# 本目录用于 `-tags embed` 构建时嵌入前端产物（由构建流程生成）
+*
+!.gitignore
+!.gitkeep
