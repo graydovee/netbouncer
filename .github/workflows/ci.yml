@@ -33,9 +33,9 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          # v2 格式配置（.golangci.yml version: "2"），需 v2 系列二进制
+          # v2 格式配置（.golangci.yml version: "2"），action 需 v7+
           version: v2.4.0
 
       - name: Run tests
