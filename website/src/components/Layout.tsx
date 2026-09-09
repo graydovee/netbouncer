@@ -1,103 +1,83 @@
-import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  Box,
-  Drawer,
   AppBar,
-  Toolbar,
-  List,
-  Typography,
+  Avatar,
+  Box,
   Divider,
+  Drawer,
   IconButton,
+  List,
   ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  useTheme,
-  useMediaQuery,
   Menu,
   MenuItem,
-  Avatar,
+  Toolbar,
   Tooltip,
-} from '@mui/material';
+  Typography,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material'
 import {
-  Menu as MenuIcon,
-  Monitor as MonitorIcon,
+  AccountCircle as AccountCircleIcon,
   Block as BlockIcon,
-  Group as GroupIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
-  AccountCircle as AccountCircleIcon,
+  Group as GroupIcon,
   Logout as LogoutIcon,
-} from '@mui/icons-material';
-import { useAuth } from '../context/AuthContext';
+  Monitor as MonitorIcon,
+  Menu as MenuIcon,
+} from '@mui/icons-material'
+import { useAuth } from '../context/AuthContext'
 
-const drawerWidth = 240;
+const drawerWidth = 240
 
-const menuItems = [
-  { text: '网络流量监控', icon: <MonitorIcon />, path: '/' },
-  { text: 'IP管理', icon: <BlockIcon />, path: '/ip-management' },
+interface MenuItem_ {
+  text: string
+  icon: ReactNode
+  path: string
+}
+
+const menuItems: MenuItem_[] = [
+  { text: '流量监控', icon: <MonitorIcon />, path: '/' },
+  { text: 'IP 管理', icon: <BlockIcon />, path: '/ip-management' },
   { text: '组管理', icon: <GroupIcon />, path: '/groups' },
-];
+]
 
-function Layout({ children }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [anchorEl, setAnchorEl] = useState(null);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const { user, authEnabled, isAuthenticated, logout } = useAuth();
+function Layout({ children }: { children: ReactNode }) {
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'))
+  const { user, authEnabled, isAuthenticated, logout } = useAuth()
 
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
-
-  const handleSidebarToggle = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
-
-  const handleNavigation = (path) => {
-    navigate(path);
+  const handleNavigation = (path: string) => {
+    navigate(path)
     if (isMobile) {
-      setMobileOpen(false);
+      setMobileOpen(false)
     }
-  };
-
-  const handleUserMenuOpen = (event) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleUserMenuClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleLogout = () => {
-    handleUserMenuClose();
-    logout();
-  };
+  }
 
   const getUserDisplayName = () => {
-    if (!user) return '用户';
-    return user.name || user.email || '用户';
-  };
+    if (!user) return '用户'
+    return user.name || user.email || '用户'
+  }
 
-  const getUserInitial = () => {
-    if (!user) return 'U';
-    if (user.name) return user.name.charAt(0).toUpperCase();
-    if (user.email) return user.email.charAt(0).toUpperCase();
-    return 'U';
-  };
+  const pageTitle = menuItems.find((item) => item.path === location.pathname)?.text
 
   const drawer = (
     <div>
       <Toolbar>
-        <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-          网络监控系统
+        <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 700 }}>
+          NetBouncer
         </Typography>
         {!isMobile && (
-          <IconButton onClick={handleSidebarToggle}>
+          <IconButton onClick={() => setSidebarOpen(!sidebarOpen)}>
             <ChevronLeftIcon />
           </IconButton>
         )}
@@ -105,7 +85,7 @@ function Layout({ children }) {
       <Divider />
       <List>
         {menuItems.map((item) => (
-          <ListItem key={item.text} disablePadding>
+          <ListItem key={item.path} disablePadding>
             <ListItemButton
               selected={location.pathname === item.path}
               onClick={() => handleNavigation(item.path)}
@@ -117,7 +97,7 @@ function Layout({ children }) {
         ))}
       </List>
     </div>
-  );
+  )
 
   return (
     <Box sx={{ display: 'flex' }}>
@@ -135,23 +115,20 @@ function Layout({ children }) {
         <Toolbar>
           <IconButton
             color="inherit"
-            aria-label="open drawer"
+            aria-label="切换侧边栏"
             edge="start"
-            onClick={isMobile ? handleDrawerToggle : handleSidebarToggle}
+            onClick={() => (isMobile ? setMobileOpen(!mobileOpen) : setSidebarOpen(!sidebarOpen))}
             sx={{ mr: 2 }}
           >
-            {isMobile ? <MenuIcon /> : (sidebarOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />)}
+            {isMobile ? <MenuIcon /> : sidebarOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
           </IconButton>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {menuItems.find(item => item.path === location.pathname)?.text || '网络监控系统'}
+            {pageTitle ?? 'NetBouncer'}
           </Typography>
           {authEnabled && isAuthenticated && (
             <>
               <Tooltip title={getUserDisplayName()}>
-                <IconButton
-                  onClick={handleUserMenuOpen}
-                  color="inherit"
-                >
+                <IconButton onClick={(event) => setAnchorEl(event.currentTarget)} color="inherit">
                   {user?.picture ? (
                     <Avatar
                       src={user.picture}
@@ -159,24 +136,16 @@ function Layout({ children }) {
                       sx={{ width: 32, height: 32 }}
                     />
                   ) : (
-                    <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
-                      {getUserInitial()}
-                    </Avatar>
+                    <AccountCircleIcon />
                   )}
                 </IconButton>
               </Tooltip>
               <Menu
                 anchorEl={anchorEl}
                 open={Boolean(anchorEl)}
-                onClose={handleUserMenuClose}
-                anchorOrigin={{
-                  vertical: 'bottom',
-                  horizontal: 'right',
-                }}
-                transformOrigin={{
-                  vertical: 'top',
-                  horizontal: 'right',
-                }}
+                onClose={() => setAnchorEl(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
               >
                 <MenuItem disabled>
                   <Typography variant="body2" color="text.secondary">
@@ -184,7 +153,12 @@ function Layout({ children }) {
                   </Typography>
                 </MenuItem>
                 <Divider />
-                <MenuItem onClick={handleLogout}>
+                <MenuItem
+                  onClick={() => {
+                    setAnchorEl(null)
+                    logout()
+                  }}
+                >
                   <LogoutIcon sx={{ mr: 1 }} fontSize="small" />
                   退出登录
                 </MenuItem>
@@ -193,11 +167,11 @@ function Layout({ children }) {
           )}
         </Toolbar>
       </AppBar>
-      
+
       <Box
         component="nav"
-        sx={{ 
-          width: { md: sidebarOpen ? drawerWidth : 0 }, 
+        sx={{
+          width: { md: sidebarOpen ? drawerWidth : 0 },
           flexShrink: { md: 0 },
           transition: theme.transitions.create('width', {
             easing: theme.transitions.easing.sharp,
@@ -208,10 +182,8 @@ function Layout({ children }) {
         <Drawer
           variant="temporary"
           open={mobileOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{
-            keepMounted: true,
-          }}
+          onClose={() => setMobileOpen(false)}
+          ModalProps={{ keepMounted: true }}
           sx={{
             display: { xs: 'block', md: 'none' },
             '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
@@ -223,19 +195,14 @@ function Layout({ children }) {
           variant="permanent"
           sx={{
             display: { xs: 'none', md: 'block' },
-            '& .MuiDrawer-paper': { 
-              boxSizing: 'border-box', 
-              width: drawerWidth,
+            '& .MuiDrawer-paper': {
+              boxSizing: 'border-box',
               overflowX: 'hidden',
               transition: theme.transitions.create('width', {
                 easing: theme.transitions.easing.sharp,
                 duration: theme.transitions.duration.enteringScreen,
               }),
-              ...(sidebarOpen ? {
-                width: drawerWidth,
-              } : {
-                width: 0,
-              }),
+              width: sidebarOpen ? drawerWidth : 0,
             },
           }}
           open
@@ -243,12 +210,12 @@ function Layout({ children }) {
           {drawer}
         </Drawer>
       </Box>
-      
+
       <Box
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
+          p: { xs: 2, md: 3 },
           width: { md: sidebarOpen ? `calc(100% - ${drawerWidth}px)` : '100%' },
           mt: '64px',
           transition: theme.transitions.create(['margin', 'width'], {
@@ -260,7 +227,7 @@ function Layout({ children }) {
         {children}
       </Box>
     </Box>
-  );
+  )
 }
 
-export default Layout;
+export default Layout

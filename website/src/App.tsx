@@ -1,13 +1,13 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
-import Layout from './components/Layout';
-import ProtectedRoute from './components/ProtectedRoute';
-import { AuthProvider } from './context/AuthContext';
-import TrafficMonitor from './pages/TrafficMonitor';
-import IPManagement from './pages/IPManagement';
-import GroupManagement from './pages/GroupManagement';
-import NotFound from './pages/NotFound';
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom'
+import { ThemeProvider, createTheme } from '@mui/material/styles'
+import CssBaseline from '@mui/material/CssBaseline'
+import Layout from './components/Layout'
+import ProtectedRoute from './components/ProtectedRoute'
+import { AuthProvider } from './context/AuthContext'
+import TrafficMonitor from './pages/TrafficMonitor'
+import IPManagement from './pages/ip/IPManagement'
+import GroupManagement from './pages/GroupManagement'
+import NotFound from './pages/NotFound'
 
 const theme = createTheme({
   palette: {
@@ -28,7 +28,7 @@ const theme = createTheme({
   typography: {
     fontFamily: '"Segoe UI", Arial, sans-serif',
   },
-});
+})
 
 function App() {
   return (
@@ -49,7 +49,7 @@ function App() {
         </Router>
       </AuthProvider>
     </ThemeProvider>
-  );
+  )
 }
 
-export default App;
+export default App

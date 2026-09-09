@@ -1,17 +1,9 @@
-import { Box, Typography, Button, Paper, Container } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
-import { Home as HomeIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import { Box, Button, Container, Paper, Typography } from '@mui/material'
+import { useNavigate } from 'react-router-dom'
+import { ArrowBack as ArrowBackIcon, Home as HomeIcon } from '@mui/icons-material'
 
 function NotFound() {
-  const navigate = useNavigate();
-
-  const handleGoHome = () => {
-    navigate('/');
-  };
-
-  const handleGoBack = () => {
-    navigate(-1);
-  };
+  const navigate = useNavigate()
 
   return (
     <Container maxWidth="md">
@@ -46,24 +38,10 @@ function NotFound() {
           >
             404
           </Typography>
-          <Typography
-            variant="h4"
-            sx={{
-              mb: 2,
-              fontWeight: 500,
-              textShadow: '1px 1px 2px rgba(0,0,0,0.3)',
-            }}
-          >
+          <Typography variant="h4" sx={{ mb: 2, fontWeight: 500, textShadow: '1px 1px 2px rgba(0,0,0,0.3)' }}>
             页面未找到
           </Typography>
-          <Typography
-            variant="body1"
-            sx={{
-              mb: 4,
-              opacity: 0.9,
-              fontSize: '1.1rem',
-            }}
-          >
+          <Typography variant="body1" sx={{ mb: 4, opacity: 0.9, fontSize: '1.1rem' }}>
             抱歉，您访问的页面不存在或已被移除。
           </Typography>
         </Paper>
@@ -73,14 +51,8 @@ function NotFound() {
             variant="contained"
             size="large"
             startIcon={<HomeIcon />}
-            onClick={handleGoHome}
-            sx={{
-              px: 4,
-              py: 1.5,
-              borderRadius: 2,
-              textTransform: 'none',
-              fontSize: '1.1rem',
-            }}
+            onClick={() => navigate('/')}
+            sx={{ px: 4, py: 1.5, borderRadius: 2, textTransform: 'none', fontSize: '1.1rem' }}
           >
             返回首页
           </Button>
@@ -88,14 +60,8 @@ function NotFound() {
             variant="outlined"
             size="large"
             startIcon={<ArrowBackIcon />}
-            onClick={handleGoBack}
-            sx={{
-              px: 4,
-              py: 1.5,
-              borderRadius: 2,
-              textTransform: 'none',
-              fontSize: '1.1rem',
-            }}
+            onClick={() => navigate(-1)}
+            sx={{ px: 4, py: 1.5, borderRadius: 2, textTransform: 'none', fontSize: '1.1rem' }}
           >
             返回上页
           </Button>
@@ -107,19 +73,16 @@ function NotFound() {
           </Typography>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'center' }}>
             <Typography variant="body2" color="text.secondary">
-              • 检查URL地址是否正确
+              • 检查 URL 地址是否正确
             </Typography>
             <Typography variant="body2" color="text.secondary">
               • 使用左侧导航栏访问其他页面
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              • 联系系统管理员获取帮助
             </Typography>
           </Box>
         </Box>
       </Box>
     </Container>
-  );
+  )
 }
 
-export default NotFound; 
+export default NotFound

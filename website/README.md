@@ -1,33 +1,32 @@
-# 网络监控系统 - React前端
+# NetBouncer - React + TypeScript 前端
 
-这是网络监控系统的React前端应用，提供了现代化的用户界面来管理网络流量监控和IP管理功能。
+NetBouncer 的前端应用，使用 React 19 + TypeScript + MUI 构建，提供流量监控、IP 规则管理和分组管理界面。
 
 ## 功能特性
 
-- 🖥️ **网络流量监控**: 实时显示网络连接数据，支持排序和自动刷新
-- 🚫 **IP管理**: 管理IP地址列表，支持封禁和允许两种行为
-- 📁 **分组管理**: 支持IP分组管理，便于批量操作
-- 📱 **响应式设计**: 支持桌面和移动设备
-- 🎨 **现代化UI**: 使用Material-UI组件库
-- 🔄 **实时更新**: 支持自动刷新和手动刷新
-- 📊 **数据排序**: 支持多列数据排序
-- 🔧 **批量操作**: 支持批量修改IP行为和所属组
-- 📥 **批量导入**: 支持批量导入IP地址
+- 🖥️ **流量监控**: 实时显示网络连接数据，支持多列排序、自动刷新（间隔可配置）
+- 🚫 **IP 管理**: 服务端分页列表，支持搜索/按组/按行为过滤，封禁与放行
+- 📁 **分组管理**: IP 分组的创建、编辑、删除，实时显示组内 IP 数量
+- 🔧 **批量操作**: 批量删除、批量设置行为、批量移动组（走后端批量 API）
+- 📥 **批量导入**: 文本粘贴或 URL 拉取批量导入 IP/CIDR
+- 🔗 **URL 状态同步**: 分页/筛选/排序状态同步到 URL，刷新不丢失、可分享
+- 📱 **响应式设计**: 小屏自动隐藏次要列，支持移动端抽屉导航
+- 🔐 **登录支持**: BasicAuth 表单登录与 OIDC 跳转登录，401 自动回到登录页
 
 ## 技术栈
 
-- **React 18**: 前端框架
-- **Vite**: 构建工具
-- **React Router**: 路由管理
-- **Material-UI**: UI组件库
-- **Emotion**: CSS-in-JS解决方案
+- **React 19**: 前端框架
+- **TypeScript**: 类型安全（strict 模式）
+- **Vite 6**: 构建工具与开发服务器
+- **React Router v7**: 路由管理
+- **MUI v7**: UI 组件库
+- **Vitest**: 单元测试
 
 ## 安装和运行
 
 ### 前置要求
 
-- Node.js 16+ 
-- npm 或 yarn
+- Node.js 18+
 
 ### 安装依赖
 
@@ -38,209 +37,91 @@ npm install
 ### 开发模式运行
 
 ```bash
+# 需要先启动后端（默认代理到 http://localhost:8080）
 npm run dev
 ```
 
-应用将在 `http://localhost:5173` 启动。
+应用将在 `http://localhost:5173` 启动，`/api` 与 `/auth` 请求自动代理到后端（可用环境变量 `VITE_BACKEND_URL` 覆盖）。
 
-### 构建生产版本
+### 常用脚本
 
-```bash
-npm run build
-```
-
-构建文件将生成在 `dist` 目录中。
-
-### 预览生产版本
-
-```bash
-npm run preview
-```
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动开发服务器 |
+| `npm run build` | 类型检查 + 生产构建（输出到 `dist/`） |
+| `npm test` | 运行 Vitest 单元测试 |
+| `npm run lint` | ESLint 检查 |
+| `npm run typecheck` | 仅 TypeScript 类型检查 |
 
 ## 项目结构
 
 ```
 src/
+├── api/                 # 统一 API 层
+│   ├── client.ts        # fetch 封装（HTTP 状态码检查、401 统一处理、错误提取）
+│   ├── types.ts         # 与后端 Go 结构体对齐的接口定义
+│   ├── auth.ts          # 认证接口
+│   ├── traffic.ts       # 流量接口
+│   ├── ip.ts            # IP 规则接口（含批量/导入）
+│   └── group.ts         # 分组接口
+├── hooks/
+│   ├── useDebounce.ts   # 防抖
+│   ├── useMessageSnackbar.ts # 消息提示 hook
+│   └── useUrlParams.ts  # URL 查询参数状态同步
+├── utils/
+│   ├── format.ts        # 字节/速率/时间格式化（含单元测试）
+│   └── actions.ts       # 规则动作文案与颜色映射
 ├── components/          # 通用组件
-│   ├── Layout.jsx      # 主布局组件（包含导航栏）
-│   ├── ConfirmDialog.jsx # 确认对话框组件
-│   └── MessageSnackbar.jsx # 消息提示组件
-├── pages/              # 页面组件
-│   ├── TrafficMonitor.jsx  # 网络流量监控页面
-│   ├── IPManagement.jsx    # IP管理页面
-│   ├── GroupManagement.jsx # 组管理页面
-│   └── NotFound.jsx        # 404页面
-├── App.jsx             # 主应用组件
-└── main.jsx            # 应用入口
+│   ├── Layout.tsx       # 主布局（侧边栏 + 顶栏）
+│   ├── ProtectedRoute.tsx    # 登录保护
+│   ├── ConfirmDialog.tsx     # 危险操作确认框
+│   ├── MessageSnackbar.tsx   # 消息提示条
+│   ├── EmptyState.tsx        # 列表空状态
+│   └── RowsPerPageControl.tsx # 每页条数控件
+├── context/
+│   └── AuthContext.tsx  # 认证状态（登录/登出/401 处理/定时校验）
+├── pages/
+│   ├── TrafficMonitor.tsx    # 流量监控
+│   ├── GroupManagement.tsx   # 组管理
+│   ├── Login.tsx / NotFound.tsx
+│   └── ip/              # IP 管理模块
+│       ├── IPManagement.tsx  # 主页面（服务端分页 + 批量操作）
+│       ├── ImportDialog.tsx  # 导入对话框
+│       ├── IpRowDialogs.tsx  # 单条规则修改组/行为对话框
+│       └── BatchDialogs.tsx  # 批量设置行为/组对话框
+├── App.tsx              # 路由与主题
+└── main.tsx             # 入口
 ```
 
-## API接口
+## 开发约定
 
-应用需要后端提供以下API接口：
+### API 调用
 
-### 流量监控
-- `GET /api/traffic` - 获取网络流量数据
+不要在组件里直接写 `fetch`，统一使用 `src/api/` 下的封装：
 
-### IP管理
-- `GET /api/ip` - 获取所有IP列表
-- `GET /api/ip/:groupId` - 根据组ID获取IP列表
-- `POST /api/ip` - 创建IP规则
-- `DELETE /api/ip/:id` - 删除IP规则
-- `GET /api/ip/action` - 获取可用操作列表
-- `PUT /api/ip/action` - 更新IP行为
-- `PUT /api/ip/group` - 更新IP所属组
+```typescript
+import { ipApi } from '../api/ip'
+import { errorMessage } from '../api/client'
 
-### 组管理
-- `GET /api/group` - 获取所有组列表
-- `POST /api/group` - 创建新组
-- `PUT /api/group` - 更新组信息
-- `DELETE /api/group/:id` - 删除组
-
-## 配置
-
-### 代理配置
-
-在 `vite.config.js` 中配置了API代理，将 `/api` 请求代理到后端服务器：
-
-```javascript
-server: {
-  proxy: {
-    '/api': {
-      target: 'http://localhost:8080',
-      changeOrigin: true,
-    },
-  },
+try {
+  const result = await ipApi.list({ page: 1, page_size: 20 })
+} catch (err) {
+  showMessage(errorMessage(err, '获取失败'), 'error')
 }
 ```
 
-### 环境变量
+封装层已统一处理：HTTP 状态码检查、`{code,message,data}` 解包、401 自动触发重新认证、错误文案提取。
 
-可以通过环境变量配置后端地址：
+### 列表页状态
 
-```bash
-# 设置后端地址
-export VITE_BACKEND_URL=http://localhost:8080
-
-# 启动开发服务器
-npm run dev
-```
-
-## 页面功能说明
-
-### 流量监控页面 (TrafficMonitor)
-
-- **实时流量显示**: 显示所有网络连接的流量统计
-- **数据排序**: 支持按流量、连接数等字段排序
-- **自动刷新**: 可配置自动刷新间隔
-- **一键封禁**: 点击按钮快速封禁IP
-- **状态显示**: 显示IP是否已被封禁
-
-### IP管理页面 (IPManagement)
-
-- **IP列表管理**: 查看所有IP或按组查看
-- **创建IP规则**: 添加新的IP地址或CIDR网段
-- **删除IP规则**: 删除不需要的IP规则
-- **修改IP行为**: 在封禁和允许之间切换
-- **修改所属组**: 将IP移动到不同的组
-- **批量操作**: 批量修改IP行为和所属组
-- **批量导入**: 支持批量导入IP地址列表
-
-### 组管理页面 (GroupManagement)
-
-- **组列表**: 显示所有IP分组
-- **创建组**: 创建新的IP分组
-- **编辑组**: 修改组名称和描述
-- **删除组**: 删除不需要的组
-
-## 组件说明
-
-### Layout组件
-
-主布局组件，包含：
-- 响应式侧边栏导航
-- 顶部应用栏
-- 移动端适配
-
-### ConfirmDialog组件
-
-确认对话框组件，用于：
-- 删除确认
-- 危险操作确认
-- 自定义确认消息
-
-### MessageSnackbar组件
-
-消息提示组件，用于：
-- 操作成功提示
-- 错误信息显示
-- 警告信息显示
-
-## 开发指南
+分页/筛选/排序使用 `useUrlParams` 同步到 URL，保证刷新不丢失。
 
 ### 添加新页面
 
-1. 在 `src/pages/` 目录下创建新的页面组件
-2. 在 `src/App.jsx` 中添加路由
-3. 在 `src/components/Layout.jsx` 中添加导航菜单项
-
-### 添加新API调用
-
-1. 在页面组件中添加API调用函数
-2. 使用 `fetch` 或 `axios` 进行HTTP请求
-3. 处理响应数据和错误情况
-
-### 样式定制
-
-项目使用Material-UI主题系统，可以通过以下方式定制样式：
-
-1. 修改 `src/App.jsx` 中的主题配置
-2. 使用 `sx` 属性进行内联样式
-3. 使用 `styled` 组件创建自定义组件
+1. 在 `src/pages/` 下创建页面组件
+2. 在 `src/App.tsx` 添加路由
+3. 在 `src/components/Layout.tsx` 的 `menuItems` 中添加导航项
 
 ## 构建和部署
 
-### 构建生产版本
-
-```bash
-npm run build
-```
-
-### 部署到静态服务器
-
-将 `dist` 目录中的文件部署到任何静态文件服务器即可。
-
-### Docker部署
-
-```dockerfile
-FROM nginx:alpine
-COPY dist/ /usr/share/nginx/html/
-COPY nginx.conf /etc/nginx/nginx.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-## 故障排除
-
-### 开发环境问题
-
-1. **端口冲突**: 修改 `vite.config.js` 中的端口配置
-2. **API代理失败**: 检查后端服务是否正常运行
-3. **依赖安装失败**: 清除 `node_modules` 重新安装
-
-### 生产环境问题
-
-1. **路由404**: 确保服务器配置了正确的重写规则
-2. **API请求失败**: 检查CORS配置和API地址
-3. **静态资源加载失败**: 检查构建路径配置
-
-## 贡献指南
-
-1. Fork 项目
-2. 创建功能分支
-3. 提交更改
-4. 推送到分支
-5. 创建 Pull Request
-
-## 许可证
-
-本项目采用 MIT 许可证。
+`make build-web`（仓库根目录）会执行 `npm ci && npm run build`，并把 `dist/` 复制到后端 `web/` 目录；`make all` / Docker 构建会进一步将其嵌入 Go 二进制（`-tags embed`），实现单文件部署。
