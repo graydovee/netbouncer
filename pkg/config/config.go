@@ -15,6 +15,10 @@ type MonitorConfig struct {
 	ExcludeSubnets string `yaml:"exclude_subnets"` // 排除的子网（逗号分隔）
 	Window         int    `yaml:"window"`          // 监控时间窗口（秒）
 	Timeout        int    `yaml:"timeout"`         // 连接超时时间（秒）
+
+	// 流量历史持久化
+	HistoryInterval      int `yaml:"history_interval"`       // 采样间隔（秒），0 表示禁用历史持久化
+	HistoryRetentionDays int `yaml:"history_retention_days"` // 历史数据保留天数
 }
 
 type FirewallType string

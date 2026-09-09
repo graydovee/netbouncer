@@ -45,6 +45,28 @@ export interface TrafficData {
   first_seen: string
   last_seen: string
   is_banned: boolean
+  /** 精确命中该 IP 的规则动作：'' / ban / allow（被网段规则覆盖时为空） */
+  rule_action: IpNetAction | ''
+  /** 精确命中规则的 ID，0 表示无精确规则 */
+  rule_id: number
+}
+
+/** 流量历史聚合点（对应 store.HistoryPoint） */
+export interface TrafficHistoryPoint {
+  ts: number
+  bytes_in: number
+  bytes_out: number
+  packets_in: number
+  packets_out: number
+}
+
+/** 流量历史 Top 榜条目（对应 store.TopEntry） */
+export interface TrafficTopEntry {
+  ip: string
+  bytes_in: number
+  bytes_out: number
+  bytes_sum: number
+  last_seen: number
 }
 
 /** IP组（对应 service.IpGroup） */

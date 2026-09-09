@@ -137,8 +137,21 @@ func (s *NetService) buildTrafficData(stats map[string]*core.TrafficStats) ([]Tr
 	bannedIpNets := convertToIpNet(bannedEntities...)
 	allowIpNets := convertToIpNet(allowEntities...)
 
+	// 精确命中表：规则为单个 IP（/32、/128）时按规范化 IP 串建索引，
+	// 供前端区分"精确规则管控"与"被网段规则覆盖"
+	rules := append(bannedEntities, allowEntities...)
+	exact := make(map[string]ruleRef, len(rules))
+	for _, e := range rules {
+		if n := parseIpNet(e.IpNet); n != nil {
+			if ones, bits := n.Mask.Size(); ones == bits {
+				exact[n.IP.String()] = ruleRef{id: e.ID, action: e.Action}
+			}
+		}
+	}
+
 	trafficData := make([]TrafficData, 0, len(stats))
 	for _, stat := range stats {
+		ref := exact[stat.RemoteIP]
 		trafficData = append(trafficData, TrafficData{
 			RemoteIP:        stat.RemoteIP,
 			LocalIP:         stat.LocalIP,
@@ -152,9 +165,17 @@ func (s *NetService) buildTrafficData(stats map[string]*core.TrafficStats) ([]Tr
 			FirstSeen:       stat.FirstSeen.Format(time.RFC3339),
 			LastSeen:        stat.LastSeen.Format(time.RFC3339),
 			IsBanned:        IsBanned(bannedIpNets, allowIpNets, stat.RemoteIP),
+			RuleAction:      ref.action,
+			RuleID:          ref.id,
 		})
 	}
 	return trafficData, nil
+}
+
+// ruleRef 精确命中规则的引用
+type ruleRef struct {
+	id     uint
+	action string
 }
 
 // GetStats 获取（排除网段后的）IP流量统计

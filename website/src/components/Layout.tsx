@@ -25,12 +25,15 @@ import {
   Block as BlockIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
+  DarkMode as DarkModeIcon,
   Group as GroupIcon,
+  LightMode as LightModeIcon,
   Logout as LogoutIcon,
   Monitor as MonitorIcon,
   Menu as MenuIcon,
 } from '@mui/icons-material'
 import { useAuth } from '../context/AuthContext'
+import { useColorMode } from '../theme'
 
 const drawerWidth = 240
 
@@ -55,6 +58,7 @@ function Layout({ children }: { children: ReactNode }) {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
   const { user, authEnabled, isAuthenticated, logout } = useAuth()
+  const { mode, toggle: toggleColorMode } = useColorMode()
 
   const handleNavigation = (path: string) => {
     navigate(path)
@@ -127,6 +131,11 @@ function Layout({ children }: { children: ReactNode }) {
           </Typography>
           {authEnabled && isAuthenticated && (
             <>
+              <Tooltip title={mode === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}>
+                <IconButton onClick={toggleColorMode} color="inherit">
+                  {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+                </IconButton>
+              </Tooltip>
               <Tooltip title={getUserDisplayName()}>
                 <IconButton onClick={(event) => setAnchorEl(event.currentTarget)} color="inherit">
                   {user?.picture ? (

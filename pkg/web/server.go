@@ -72,6 +72,8 @@ func NewServer(netService *service.NetService, authHandler AuthHandler) *Server 
 
 func (s *Server) registerAPIRoutes(e *echo.Echo) {
 	e.GET("/api/traffic", s.handleGetTraffic)
+	e.GET("/api/traffic/history", s.handleTrafficHistory)
+	e.GET("/api/traffic/history/top", s.handleTrafficHistoryTop)
 
 	e.GET("/api/ip", s.handleListIpNets)
 	e.POST("/api/ip", s.handleCreateIpNet)
@@ -201,6 +203,52 @@ func (s *Server) handleGetTraffic(c echo.Context) error {
 		return respondServiceError(c, err)
 	}
 	return respondSuccess(c, trafficData)
+}
+
+// handleTrafficHistory 查询流量历史趋势
+// 查询参数: start, end (unix秒), bucket (秒), ip (可选，单IP曲线)
+func (s *Server) handleTrafficHistory(c echo.Context) error {
+	start, ok, err := queryInt(c, "start", 0)
+	if !ok {
+		return err
+	}
+	end, ok, err := queryInt(c, "end", 0)
+	if !ok {
+		return err
+	}
+	bucket, ok, err := queryInt(c, "bucket", 300)
+	if !ok {
+		return err
+	}
+
+	points, err := s.netService.TrafficHistory(int64(start), int64(end), int64(bucket), c.QueryParam("ip"))
+	if err != nil {
+		return respondServiceError(c, err)
+	}
+	return respondSuccess(c, points)
+}
+
+// handleTrafficHistoryTop 查询时间范围内流量最大的IP榜
+// 查询参数: start, end (unix秒), limit (默认10，最大100)
+func (s *Server) handleTrafficHistoryTop(c echo.Context) error {
+	start, ok, err := queryInt(c, "start", 0)
+	if !ok {
+		return err
+	}
+	end, ok, err := queryInt(c, "end", 0)
+	if !ok {
+		return err
+	}
+	limit, ok, err := queryInt(c, "limit", 10)
+	if !ok {
+		return err
+	}
+
+	entries, err := s.netService.TrafficHistoryTop(int64(start), int64(end), limit)
+	if err != nil {
+		return respondServiceError(c, err)
+	}
+	return respondSuccess(c, entries)
 }
 
 func (s *Server) handleCreateIpNet(c echo.Context) error {

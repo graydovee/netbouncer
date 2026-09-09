@@ -51,6 +51,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&cfg.Monitor.ExcludeSubnets, "monitor-exclude-subnets", "e", cfg.Monitor.ExcludeSubnets, "排除的子网（逗号分隔，如：127.0.0.1/8,192.168.0.0/16）")
 	rootCmd.Flags().IntVarP(&cfg.Monitor.Window, "monitor-window", "w", cfg.Monitor.Window, "监控时间窗口（秒）")
 	rootCmd.Flags().IntVarP(&cfg.Monitor.Timeout, "monitor-timeout", "t", cfg.Monitor.Timeout, "连接超时时间（秒）")
+	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryInterval, "monitor-history-interval", cfg.Monitor.HistoryInterval, "流量历史采样间隔（秒），0 表示禁用")
+	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryRetentionDays, "monitor-history-retention-days", cfg.Monitor.HistoryRetentionDays, "流量历史保留天数，0 表示永久保留")
 
 	// 防火墙配置
 	rootCmd.Flags().StringVarP(&cfg.Firewall.Chain, "firewall-chain", "n", cfg.Firewall.Chain, "iptables链名称")
@@ -134,18 +136,24 @@ func run(cmd *cobra.Command) error {
 		"monitor-exclude-subnets": func(c *config.Config, v string) error { c.Monitor.ExcludeSubnets = v; return nil },
 		"monitor-window":          func(c *config.Config, v string) error { return parseIntFlag(v, func(n int) { c.Monitor.Window = n }) },
 		"monitor-timeout":         func(c *config.Config, v string) error { return parseIntFlag(v, func(n int) { c.Monitor.Timeout = n }) },
-		"firewall-chain":          func(c *config.Config, v string) error { c.Firewall.Chain = v; return nil },
-		"firewall-ipset":          func(c *config.Config, v string) error { c.Firewall.IpSet = v; return nil },
-		"firewall-type":           func(c *config.Config, v string) error { c.Firewall.Type = v; return nil },
-		"listen":                  func(c *config.Config, v string) error { c.Web.Listen = v; return nil },
-		"db-driver":               func(c *config.Config, v string) error { c.Database.Driver = v; return nil },
-		"db-host":                 func(c *config.Config, v string) error { c.Database.Host = v; return nil },
-		"db-port":                 func(c *config.Config, v string) error { return parseIntFlag(v, func(n int) { c.Database.Port = n }) },
-		"db-username":             func(c *config.Config, v string) error { c.Database.Username = v; return nil },
-		"db-password":             func(c *config.Config, v string) error { c.Database.Password = v; return nil },
-		"db-name":                 func(c *config.Config, v string) error { c.Database.Database = v; return nil },
-		"db-dsn":                  func(c *config.Config, v string) error { c.Database.DSN = v; return nil },
-		"db-log-level":            func(c *config.Config, v string) error { c.Database.LogLevel = v; return nil },
+		"monitor-history-interval": func(c *config.Config, v string) error {
+			return parseIntFlag(v, func(n int) { c.Monitor.HistoryInterval = n })
+		},
+		"monitor-history-retention-days": func(c *config.Config, v string) error {
+			return parseIntFlag(v, func(n int) { c.Monitor.HistoryRetentionDays = n })
+		},
+		"firewall-chain": func(c *config.Config, v string) error { c.Firewall.Chain = v; return nil },
+		"firewall-ipset": func(c *config.Config, v string) error { c.Firewall.IpSet = v; return nil },
+		"firewall-type":  func(c *config.Config, v string) error { c.Firewall.Type = v; return nil },
+		"listen":         func(c *config.Config, v string) error { c.Web.Listen = v; return nil },
+		"db-driver":      func(c *config.Config, v string) error { c.Database.Driver = v; return nil },
+		"db-host":        func(c *config.Config, v string) error { c.Database.Host = v; return nil },
+		"db-port":        func(c *config.Config, v string) error { return parseIntFlag(v, func(n int) { c.Database.Port = n }) },
+		"db-username":    func(c *config.Config, v string) error { c.Database.Username = v; return nil },
+		"db-password":    func(c *config.Config, v string) error { c.Database.Password = v; return nil },
+		"db-name":        func(c *config.Config, v string) error { c.Database.Database = v; return nil },
+		"db-dsn":         func(c *config.Config, v string) error { c.Database.DSN = v; return nil },
+		"db-log-level":   func(c *config.Config, v string) error { c.Database.LogLevel = v; return nil },
 	}
 
 	// 加载配置文件（如果指定）。优先级：默认值 < 配置文件 < 显式命令行参数
@@ -224,9 +232,20 @@ func run(cmd *cobra.Command) error {
 	}
 
 	// 监听退出信号，统一走优雅退出流程：
-	// 停止Web服务 -> 停止流量监控 -> 清理防火墙规则
+	// 停止Web服务 -> 停止流量监控与采样 -> 清理防火墙规则
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
+
+	// 流量历史采样器（history_interval=0 时禁用）
+	if cfg.Monitor.HistoryInterval > 0 {
+		sampler := service.NewSampler(
+			mon,
+			st.TrafficSampleStore,
+			time.Duration(cfg.Monitor.HistoryInterval)*time.Second,
+			time.Duration(cfg.Monitor.HistoryRetentionDays)*24*time.Hour,
+		)
+		sampler.Start(ctx)
+	}
 
 	server := web.NewServer(svc, authHandler)
 

@@ -7,8 +7,9 @@ import (
 )
 
 type Store struct {
-	IpNetStore      *IpNetStore
-	IpNetGroupStore *IpNetGroupStore
+	IpNetStore         *IpNetStore
+	IpNetGroupStore    *IpNetGroupStore
+	TrafficSampleStore *TrafficSampleStore
 }
 
 func NewStore(cfg *config.DatabaseConfig) (*Store, error) {
@@ -20,15 +21,17 @@ func NewStore(cfg *config.DatabaseConfig) (*Store, error) {
 	}
 
 	// 自动迁移数据库表结构
-	if err := db.AutoMigrate(IpNet{}, IpNetGroup{}); err != nil {
+	if err := db.AutoMigrate(IpNet{}, IpNetGroup{}, TrafficSample{}); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
 
 	ipNetStore := NewIpNetStore(db)
 	ipNetGroupStore := NewIpNetGroupStore(db)
+	trafficSampleStore := NewTrafficSampleStore(db)
 
 	return &Store{
-		IpNetStore:      ipNetStore,
-		IpNetGroupStore: ipNetGroupStore,
+		IpNetStore:         ipNetStore,
+		IpNetGroupStore:    ipNetGroupStore,
+		TrafficSampleStore: trafficSampleStore,
 	}, nil
 }

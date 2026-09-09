@@ -44,10 +44,12 @@ func SaveConfig(cfg *Config, configPath string) error {
 func DefaultConfig() *Config {
 	return &Config{
 		Monitor: MonitorConfig{
-			Interface:      "",
-			ExcludeSubnets: "",
-			Window:         30,
-			Timeout:        60 * 60 * 24, // 24小时
+			Interface:            "",
+			ExcludeSubnets:       "",
+			Window:               30,
+			Timeout:              60 * 60 * 24, // 24小时
+			HistoryInterval:      60,           // 60秒采样一次
+			HistoryRetentionDays: 30,           // 保留30天
 		},
 		Firewall: FirewallConfig{
 			Chain: "NETBOUNCER",

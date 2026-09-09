@@ -1,6 +1,5 @@
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom'
-import { ThemeProvider, createTheme } from '@mui/material/styles'
-import CssBaseline from '@mui/material/CssBaseline'
+import { ColorModeProvider } from './theme'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
@@ -9,31 +8,9 @@ import IPManagement from './pages/ip/IPManagement'
 import GroupManagement from './pages/GroupManagement'
 import NotFound from './pages/NotFound'
 
-const theme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#2c3e50',
-    },
-    secondary: {
-      main: '#3498db',
-    },
-    error: {
-      main: '#e74c3c',
-    },
-    success: {
-      main: '#27ae60',
-    },
-  },
-  typography: {
-    fontFamily: '"Segoe UI", Arial, sans-serif',
-  },
-})
-
 function App() {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
+    <ColorModeProvider>
       <AuthProvider>
         <Router>
           <ProtectedRoute>
@@ -48,7 +25,7 @@ function App() {
           </ProtectedRoute>
         </Router>
       </AuthProvider>
-    </ThemeProvider>
+    </ColorModeProvider>
   )
 }
 

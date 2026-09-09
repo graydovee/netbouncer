@@ -6,6 +6,8 @@ monitor:
   exclude_subnets: "127.0.0.1/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"  # 排除的子网（逗号分隔）
   window: 60  # 监控时间窗口（秒）
   timeout: 86400  # 连接超时时间（秒，24小时）
+  history_interval: 60  # 流量历史采样间隔（秒），0 表示禁用历史持久化
+  history_retention_days: 30  # 流量历史保留天数，0 表示永久保留
 
 # 防火墙配置
 firewall:

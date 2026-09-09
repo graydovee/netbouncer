@@ -12,7 +12,9 @@ type TrafficData struct {
 	Connections     int     `json:"connections"`       // 连接数
 	FirstSeen       string  `json:"first_seen"`        // 首次发现时间
 	LastSeen        string  `json:"last_seen"`         // 最后活动时间
-	IsBanned        bool    `json:"is_banned"`         // 是否被ban
+	IsBanned        bool    `json:"is_banned"`         // 是否被ban（含被网段规则覆盖的情况）
+	RuleAction      string  `json:"rule_action"`       // 精确命中该IP的规则动作：""/ban/allow（网段覆盖时为空）
+	RuleID          uint    `json:"rule_id"`           // 精确命中规则的ID，0 表示无精确规则
 }
 
 type IpNet struct {

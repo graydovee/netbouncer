@@ -81,7 +81,9 @@ GET /api/traffic
       "connections": 5,
       "first_seen": "2024-01-01T10:00:00Z",
       "last_seen": "2024-01-01T10:05:00Z",
-      "is_banned": false
+      "is_banned": false,
+      "rule_action": "ban",
+      "rule_id": 42
     }
   ]
 }
@@ -95,7 +97,62 @@ GET /api/traffic
 - `bytes_in_per_sec` / `bytes_out_per_sec`: 每秒接收/发送字节数（滑动窗口）
 - `connections`: 当前连接数（按 TCP SYN/FIN 估算）
 - `first_seen` / `last_seen`: 首次发现/最后活动时间（ISO 8601）
-- `is_banned`: 是否命中封禁规则
+- `is_banned`: 是否命中封禁规则（含被网段规则覆盖的情况）
+- `rule_action`: 精确命中该 IP 的规则动作（`""`/`ban`/`allow`），被网段规则覆盖时为空
+- `rule_id`: 精确命中规则的 ID，`0` 表示无精确规则
+
+### 查询流量历史趋势
+
+按时间桶聚合查询历史流量（由采样器按 `monitor.history_interval` 周期写入，存区间增量）。
+
+**请求**
+```http
+GET /api/traffic/history?start=1735689600&end=1735776000&bucket=900&ip=1.2.3.4
+```
+
+**查询参数**
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `start` | int | 开始时间（unix 秒），默认 24 小时前 |
+| `end` | int | 结束时间（unix 秒），默认当前时间 |
+| `bucket` | int | 聚合桶宽（秒），范围 [10, 86400]，默认 300 |
+| `ip` | string | 可选，仅查询该 IP 的曲线；不传则为全服汇总 |
+
+**响应**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    { "ts": 1735690200, "bytes_in": 1048576, "bytes_out": 262144, "packets_in": 1024, "packets_out": 512 }
+  ]
+}
+```
+
+**字段说明**：`bytes_in/out`、`packets_in/out` 为该桶内的**流量增量**（非累计值）。
+
+### 查询流量 Top 榜
+
+统计时间范围内总流量最大的前 N 个 IP。
+
+**请求**
+```http
+GET /api/traffic/history/top?start=1735689600&end=1735776000&limit=10
+```
+
+**查询参数**：`start`、`end` 同上；`limit` 默认 10，最大 100。
+
+**响应**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    { "ip": "1.2.3.4", "bytes_in": 104857600, "bytes_out": 26214400, "bytes_sum": 131072000, "last_seen": 1735775000 }
+  ]
+}
+```
 
 ## IP 管理 API
 
