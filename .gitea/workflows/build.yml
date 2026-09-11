@@ -1,0 +1,74 @@
+# 只产出镜像、不部署到集群：构建双架构镜像并合并 manifest 推到 Harbor。
+#
+# 触发：推送到主分支 / 打 tag 都会构建并推镜像
+#   分支推送 → 镜像 tag 用短 SHA（sha-xxxxxxx）
+#   tag 推送 → 镜像 tag 用 tag 名（vX.Y.Z）
+#
+# 前置：四个 Actions secrets 已建且作用域覆盖本仓库（见 SKILL.md 3.3）
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+
+env:
+  REGISTRY: harbor.graydove.cn
+  IMAGE: harbor.graydove.cn/apps/netbouncer
+  REPO: git.graydove.cn/graydove/netbouncer.git
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: linux-amd64, arch: amd64 }
+          - { runner: linux-arm64, arch: arm64 }
+    # 凭据走环境变量，不要内联进脚本
+    env:
+      HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+      CI_GIT_USER: ${{ secrets.CI_GIT_USER }}
+      CI_GIT_TOKEN: ${{ secrets.CI_GIT_TOKEN }}
+    steps:
+      - name: checkout
+        run: |
+          set -eu
+          git clone --branch '${{ github.ref_name }}' --depth 1 \
+            "https://${CI_GIT_USER}:${CI_GIT_TOKEN}@${REPO}" .
+
+      - name: build & push
+        run: |
+          set -eu
+          case '${{ github.ref }}' in
+            refs/tags/*) TAG='${{ github.ref_name }}' ;;
+            *)           TAG="sha-$(printf %s '${{ github.sha }}' | cut -c1-7)" ;;
+          esac
+          echo "$HARBOR_PASSWORD" | docker login "$REGISTRY" -u "$HARBOR_USERNAME" --password-stdin
+          docker build -t "${IMAGE}:${TAG}-${{ matrix.arch }}" .
+          docker push "${IMAGE}:${TAG}-${{ matrix.arch }}"
+
+  merge:
+    name: merge manifest
+    needs: [build]
+    runs-on: linux-amd64
+    env:
+      HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+      HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+    steps:
+      - name: merge per-arch images into one multi-arch manifest
+        run: |
+          set -eu
+          case '${{ github.ref }}' in
+            refs/tags/*) TAG='${{ github.ref_name }}' ;;
+            *)           TAG="sha-$(printf %s '${{ github.sha }}' | cut -c1-7)" ;;
+          esac
+          echo "$HARBOR_PASSWORD" | docker login "$REGISTRY" -u "$HARBOR_USERNAME" --password-stdin
+          docker buildx imagetools create \
+            -t "${IMAGE}:${TAG}" \
+            -t "${IMAGE}:latest" \
+            "${IMAGE}:${TAG}-amd64" "${IMAGE}:${TAG}-arm64"
+          docker buildx imagetools inspect "${IMAGE}:${TAG}"
