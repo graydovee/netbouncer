@@ -28,7 +28,7 @@ ARG TARGETARCH
 # - 异架构目标用 Debian 的交叉工具链（只存在部分宿主组合，显式限定宿主架构）
 # - libpcap0.8-dev 两个目标架构都装（Multi-Arch: same，头文件可共存）
 # - apt 走国内镜像，构建环境在国内网络时 deb.debian.org 直连极慢
-RUN --mount=type=cache,target=/var/cache/apt set -eux; \
+RUN set -eux; \
     sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
     HOSTARCH="$(dpkg --print-architecture)"; \
     case "$HOSTARCH" in \
@@ -67,7 +67,7 @@ COPY . .
 COPY --from=frontend-builder /app/frontend/dist ./pkg/web/dist
 
 # 按目标架构编译：同架构用原生 gcc，异架构用上面装好的交叉工具链
-RUN --mount=type=cache,target=/var/cache/apt set -eux; \
+RUN set -eux; \
     HOSTARCH="$(dpkg --print-architecture)"; \
     if [ "$TARGETARCH" = "$HOSTARCH" ]; then \
       CC=; \
@@ -86,7 +86,7 @@ FROM harbor.graydove.cn/library/ubuntu:22.04
 
 # 安装运行时依赖（apt 走国内镜像；
 # 基础镜像尚无 ca-certificates，只能用 http，装完即弃不影响运行时安全）
-RUN --mount=type=cache,target=/var/cache/apt sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g; s|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list \
+RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g; s|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list \
     && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libpcap0.8 \
