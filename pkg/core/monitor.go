@@ -16,19 +16,50 @@ import (
 	"github.com/graydovee/netbouncer/pkg/config"
 )
 
+// 端口/连接维度统计的内存保护上限
+const (
+	// maxPortsPerProto 每个协议下每 IP 保留的最大端口条目数，超出并入端口 0（"其他"）
+	maxPortsPerProto = 96
+	// maxUDPFlowsPerIP 每 IP 追踪的最大 UDP 流数，超出时随机淘汰
+	maxUDPFlowsPerIP = 256
+	// udpFlowTimeout UDP 流的空闲超时，超时后视为流结束（再次出现会计为新流）
+	udpFlowTimeout = 5 * time.Minute
+	// portOther 端口 0 作为"其他/未分类"的保留端口值
+	portOther = 0
+)
+
 // TrafficStats 流量统计信息（对外暴露）
 type TrafficStats struct {
-	RemoteIP        string    `json:"remote_ip"`
-	LocalIP         string    `json:"local_ip"`
-	BytesSent       uint64    `json:"bytes_sent"`         // 总发送字节数
-	BytesRecv       uint64    `json:"bytes_recv"`         // 总接收字节数
-	PacketsSent     uint64    `json:"packets_sent"`       // 总发送包数
-	PacketsRecv     uint64    `json:"packets_recv"`       // 总接收包数
-	BytesSentPerSec float64   `json:"bytes_sent_per_sec"` // 每秒发送字节数
-	BytesRecvPerSec float64   `json:"bytes_recv_per_sec"` // 每秒接收字节数
-	LastSeen        time.Time `json:"last_seen"`          // 最后活动时间
-	FirstSeen       time.Time `json:"first_seen"`         // 首次发现时间
-	Connections     int       `json:"connections"`        // 连接数
+	RemoteIP        string                                `json:"remote_ip"`
+	LocalIP         string                                `json:"local_ip"`
+	BytesSent       uint64                                `json:"bytes_sent"`          // 总发送字节数
+	BytesRecv       uint64                                `json:"bytes_recv"`          // 总接收字节数
+	PacketsSent     uint64                                `json:"packets_sent"`        // 总发送包数
+	PacketsRecv     uint64                                `json:"packets_recv"`        // 总接收包数
+	BytesSentPerSec float64                               `json:"bytes_sent_per_sec"`  // 每秒发送字节数
+	BytesRecvPerSec float64                               `json:"bytes_recv_per_sec"`  // 每秒接收字节数
+	LastSeen        time.Time                             `json:"last_seen"`           // 最后活动时间
+	FirstSeen       time.Time                             `json:"first_seen"`          // 首次发现时间
+	Connections     int                                   `json:"connections"`         // 当前连接数（估算值）
+	ConnsIn         uint64                                `json:"conns_in"`            // 累计新建入站连接数（TCP SYN / 新 UDP 流）
+	ConnsOut        uint64                                `json:"conns_out"`           // 累计新建出站连接数
+	Protocols       map[string]*ProtoPortStats            `json:"protocols,omitempty"` // 协议维度累计统计
+	Ports           map[string]map[uint16]*ProtoPortStats `json:"ports,omitempty"`     // 协议→端口维度累计统计
+}
+
+// ProtoPortStats 协议/端口维度的流量统计（累计值）
+type ProtoPortStats struct {
+	BytesSent   uint64 `json:"bytes_sent"`
+	BytesRecv   uint64 `json:"bytes_recv"`
+	PacketsSent uint64 `json:"packets_sent"`
+	PacketsRecv uint64 `json:"packets_recv"`
+	ConnsIn     uint64 `json:"conns_in"`  // 该维度上新建入站连接数
+	ConnsOut    uint64 `json:"conns_out"` // 该维度上新建出站连接数
+}
+
+// TotalBytes 总字节数
+func (s *ProtoPortStats) TotalBytes() uint64 {
+	return s.BytesSent + s.BytesRecv
 }
 
 // GetTotalBytes 获取总字节数
@@ -55,6 +86,7 @@ type Monitor struct {
 	windowSize        time.Duration // 滑动窗口大小（如30秒）
 	connectionTimeout time.Duration // 连接超时时间
 	excludeSubnets    []*net.IPNet
+	captureFilter     string // BPF 捕获过滤器，空则使用默认值
 }
 
 // NewMonitor 创建新的监控器
@@ -114,6 +146,7 @@ func NewMonitor(cfg *config.MonitorConfig) (*Monitor, error) {
 		windowSize:        windowSize,
 		connectionTimeout: connectionTimeout,
 		excludeSubnets:    excludedSubnets,
+		captureFilter:     strings.TrimSpace(cfg.CaptureFilter),
 	}
 
 	// 获取本地IP地址
@@ -175,11 +208,15 @@ func (m *Monitor) Start() error {
 
 	m.handle = handle
 
-	// 设置过滤器，只捕获TCP和UDP包
-	if err := m.handle.SetBPFFilter("tcp or udp"); err != nil {
+	// 默认捕获 TCP/UDP/ICMP，可通过 monitor.capture_filter 覆盖
+	filter := m.captureFilter
+	if filter == "" {
+		filter = "tcp or udp or icmp or icmp6"
+	}
+	if err := m.handle.SetBPFFilter(filter); err != nil {
 		m.isRunning.Store(false)
 		handle.Close()
-		return fmt.Errorf("failed to set BPF filter: %v", err)
+		return fmt.Errorf("failed to set BPF filter %q: %v", filter, err)
 	}
 
 	// 启动包捕获协程
@@ -188,7 +225,7 @@ func (m *Monitor) Start() error {
 	// 启动清理协程
 	m.StartCleanupRoutine()
 
-	slog.Info("Network monitor started on device", "device", m.device)
+	slog.Info("Network monitor started on device", "device", m.device, "filter", filter)
 	return nil
 }
 
@@ -237,13 +274,13 @@ func (m *Monitor) processPacket(packet gopacket.Packet) {
 
 	var srcIP, dstIP string
 	var length uint64
-	var isTCP bool
-	var tcpLayer *layers.TCP
+	var ipProto int // IANA 协议号，用于传输层头缺失时（分片后继包）分类协议
 
 	// 处理IPv4
 	if ipv4, ok := ipLayer.(*layers.IPv4); ok {
 		srcIP = ipv4.SrcIP.String()
 		dstIP = ipv4.DstIP.String()
+		ipProto = int(ipv4.Protocol)
 		// 优先使用 IP 头中的总长度字段：snaplen 截断或 TCP 分段卸载时
 		// packet.Data() 会比真实包小，导致流量少算
 		length = uint64(ipv4.Length)
@@ -254,19 +291,13 @@ func (m *Monitor) processPacket(packet gopacket.Packet) {
 		// 处理IPv6，Length 字段不含 40 字节固定头部
 		srcIP = ipv6.SrcIP.String()
 		dstIP = ipv6.DstIP.String()
+		ipProto = int(ipv6.NextHeader)
 		length = uint64(ipv6.Length) + 40
 		if length <= 40 {
 			length = uint64(len(packet.Data()))
 		}
 	} else {
 		return
-	}
-
-	// 检查是否为TCP包
-	tcp := packet.Layer(layers.LayerTypeTCP)
-	if tcp != nil {
-		isTCP = true
-		tcpLayer, _ = tcp.(*layers.TCP)
 	}
 
 	// 确定远程IP和流量方向
@@ -288,54 +319,53 @@ func (m *Monitor) processPacket(packet gopacket.Packet) {
 		return
 	}
 
-	// 统计TCP连接数
-	if isTCP && tcpLayer != nil {
-		m.mutex.Lock()
-		stats, exists := m.stats[remoteIP]
-		if !exists {
-			stats = &internalTrafficStats{
-				remoteIP:   remoteIP,
-				localIP:    localIP,
-				firstSeen:  time.Now(),
-				lastSeen:   time.Now(),
-				sentWindow: newTrafficWindow(m.windowSize),
-				recvWindow: newTrafficWindow(m.windowSize),
-			}
-			m.stats[remoteIP] = stats
-		}
+	proto, srcPort, dstPort, isNewConn, isConnEnd := classifyPacket(packet, ipProto)
 
-		// 改进的TCP连接数统计逻辑
-		// 只统计SYN包（新连接开始）
-		if tcpLayer.SYN && !tcpLayer.ACK {
-			stats.connections++
-		}
-		// 统计FIN或RST包（连接结束）
-		if (tcpLayer.FIN || tcpLayer.RST) && stats.connections > 0 {
-			stats.connections--
-		}
-		m.mutex.Unlock()
-	}
-
-	// 更新统计信息
-	m.updateStats(remoteIP, localIP, length, isSent)
+	m.updateStats(remoteIP, localIP, proto, srcPort, dstPort, length, isSent, isNewConn, isConnEnd)
 }
 
-// updateStats 更新流量统计
-func (m *Monitor) updateStats(remoteIP string, localIP string, bytes uint64, isSent bool) {
+// classifyPacket 识别协议、端口与连接状态变化
+// 端口取目标端口：收包为本机服务端口，发包为对端服务端口
+func classifyPacket(packet gopacket.Packet, ipProto int) (proto string, srcPort, dstPort uint16, isNewConn, isConnEnd bool) {
+	if l := packet.Layer(layers.LayerTypeTCP); l != nil {
+		if tcp, ok := l.(*layers.TCP); ok {
+			// 只统计SYN包（新连接开始）
+			isNewConn = tcp.SYN && !tcp.ACK
+			// 统计FIN或RST包（连接结束）
+			isConnEnd = tcp.FIN || tcp.RST
+			return "tcp", uint16(tcp.SrcPort), uint16(tcp.DstPort), isNewConn, isConnEnd
+		}
+	}
+	if l := packet.Layer(layers.LayerTypeUDP); l != nil {
+		if udp, ok := l.(*layers.UDP); ok {
+			return "udp", uint16(udp.SrcPort), uint16(udp.DstPort), false, false
+		}
+	}
+	if packet.Layer(layers.LayerTypeICMPv4) != nil || packet.Layer(layers.LayerTypeICMPv6) != nil {
+		return "icmp", 0, 0, false, false
+	}
+
+	// 传输层头缺失（如分片的后继包），按 IP 协议号分类，端口记 0
+	switch ipProto {
+	case 6:
+		return "tcp", 0, 0, false, false
+	case 17:
+		return "udp", 0, 0, false, false
+	case 1, 58:
+		return "icmp", 0, 0, false, false
+	}
+	return "other", 0, 0, false, false
+}
+
+// updateStats 更新流量统计（单一锁内完成总量与协议/端口/连接维度）
+func (m *Monitor) updateStats(remoteIP string, localIP string, proto string, srcPort, dstPort uint16, bytes uint64, isSent bool, isNewConn, isConnEnd bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	now := time.Now()
 	stats, exists := m.stats[remoteIP]
 	if !exists {
-		stats = &internalTrafficStats{
-			remoteIP:   remoteIP,
-			localIP:    localIP,
-			firstSeen:  now,
-			lastSeen:   now,
-			sentWindow: newTrafficWindow(m.windowSize),
-			recvWindow: newTrafficWindow(m.windowSize),
-		}
+		stats = newInternalTrafficStats(remoteIP, localIP, now, m.windowSize)
 		m.stats[remoteIP] = stats
 	}
 
@@ -350,38 +380,54 @@ func (m *Monitor) updateStats(remoteIP string, localIP string, bytes uint64, isS
 		stats.recvWindow.addPoint(bytes)
 	}
 
+	// 更新连接数：TCP 新连接（SYN）与 UDP 新流都视为一次新建连接
+	isNewFlow := false
+	if proto == "udp" {
+		isNewFlow = stats.trackUDPFlow(srcPort, dstPort, now)
+	}
+	if isNewConn || isNewFlow {
+		stats.connections++
+		if isSent {
+			stats.connsOut++
+		} else {
+			stats.connsIn++
+		}
+	}
+	if isConnEnd && stats.connections > 0 {
+		stats.connections--
+	}
+
+	// 协议维度
+	ps, ok := stats.protocols[proto]
+	if !ok {
+		ps = &protoPortStats{}
+		stats.protocols[proto] = ps
+	}
+	ps.add(bytes, isSent, isNewConn || isNewFlow)
+
+	// 端口维度：以目标端口为服务端口，超出上限并入端口 0（"其他"）
+	pm, ok := stats.ports[proto]
+	if !ok {
+		pm = make(map[uint16]*protoPortStats)
+		stats.ports[proto] = pm
+	}
+	entry, ok := pm[dstPort]
+	if !ok {
+		if len(pm) >= maxPortsPerProto {
+			dstPort = portOther
+			entry = pm[portOther]
+			if entry == nil {
+				entry = &protoPortStats{}
+				pm[portOther] = entry
+			}
+		} else {
+			entry = &protoPortStats{}
+			pm[dstPort] = entry
+		}
+	}
+	entry.add(bytes, isSent, isNewConn || isNewFlow)
+
 	stats.lastSeen = now
-}
-
-// cleanupInactiveConnections 清理长时间未活动的连接
-func (m *Monitor) cleanupInactiveConnections() {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	now := time.Now()
-	for ip, stats := range m.stats {
-		if now.Sub(stats.lastSeen) > m.connectionTimeout {
-			delete(m.stats, ip)
-		}
-	}
-}
-
-// GetStats 获取过滤后的IP流量统计
-func (m *Monitor) GetStats() map[string]*TrafficStats {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	result := make(map[string]*TrafficStats)
-
-	for ip, stats := range m.stats {
-		// 检查IP是否在排除的子网中
-		if isIPExcluded(ip, m.excludeSubnets) {
-			continue
-		}
-		result[ip] = stats.toTrafficStats()
-	}
-
-	return result
 }
 
 // isIPExcluded 检查IP是否在排除的子网中
@@ -416,7 +462,7 @@ type windowPoint struct {
 	increment uint64 // 这次增加的字节数
 }
 
-// newTrafficWindow 创建新的流量滑动窗口
+// newTrafficWindow 创建新的流量窗口
 func newTrafficWindow(windowSize time.Duration) *trafficWindow {
 	if windowSize <= 0 {
 		windowSize = 30 * time.Second
@@ -493,13 +539,126 @@ type internalTrafficStats struct {
 	lastSeen    time.Time
 	firstSeen   time.Time
 	connections int
+	connsIn     uint64         // 累计新建入站连接
+	connsOut    uint64         // 累计新建出站连接
 	sentWindow  *trafficWindow // 发送流量滑动窗口
 	recvWindow  *trafficWindow // 接收流量滑动窗口
+	protocols   map[string]*protoPortStats
+	ports       map[string]map[uint16]*protoPortStats
+	udpFlows    map[udpFlowKey]time.Time
 }
 
-// toTrafficStats 将内部统计转换为对外暴露的统计
+// protoPortStats 协议/端口维度的累计计数器
+type protoPortStats struct {
+	bytesSent   uint64
+	bytesRecv   uint64
+	packetsSent uint64
+	packetsRecv uint64
+	connsIn     uint64
+	connsOut    uint64
+}
+
+func (p *protoPortStats) add(bytes uint64, isSent, isNewConn bool) {
+	if isSent {
+		p.bytesSent += bytes
+		p.packetsSent++
+		if isNewConn {
+			p.connsOut++
+		}
+	} else {
+		p.bytesRecv += bytes
+		p.packetsRecv++
+		if isNewConn {
+			p.connsIn++
+		}
+	}
+}
+
+// udpFlowKey UDP 流的四元组键（不含 IP，IP 即条目本身）
+type udpFlowKey struct {
+	localIP    string
+	localPort  uint16
+	remotePort uint16
+}
+
+// newInternalTrafficStats 创建新的内部统计条目
+func newInternalTrafficStats(remoteIP, localIP string, now time.Time, windowSize time.Duration) *internalTrafficStats {
+	return &internalTrafficStats{
+		remoteIP:   remoteIP,
+		localIP:    localIP,
+		firstSeen:  now,
+		lastSeen:   now,
+		sentWindow: newTrafficWindow(windowSize),
+		recvWindow: newTrafficWindow(windowSize),
+		protocols:  make(map[string]*protoPortStats),
+		ports:      make(map[string]map[uint16]*protoPortStats),
+		udpFlows:   make(map[udpFlowKey]time.Time),
+	}
+}
+
+// trackUDPFlow 记录 UDP 包，返回是否为新流；流数达到上限时随机淘汰旧流防止内存膨胀
+func (its *internalTrafficStats) trackUDPFlow(srcPort, dstPort uint16, now time.Time) bool {
+	key := udpFlowKey{localIP: its.localIP, localPort: dstPort, remotePort: srcPort}
+	if _, ok := its.udpFlows[key]; ok {
+		its.udpFlows[key] = now
+		return false
+	}
+	if len(its.udpFlows) >= maxUDPFlowsPerIP {
+		for k := range its.udpFlows {
+			delete(its.udpFlows, k)
+			break
+		}
+	}
+	its.udpFlows[key] = now
+	return true
+}
+
+// expireUDPFlows 清理超时的空闲 UDP 流
+func (its *internalTrafficStats) expireUDPFlows(now time.Time) {
+	cutoff := now.Add(-udpFlowTimeout)
+	for k, t := range its.udpFlows {
+		if t.Before(cutoff) {
+			delete(its.udpFlows, k)
+		}
+	}
+}
+
+// cleanupInactiveConnections 清理长时间未活动的连接
+func (m *Monitor) cleanupInactiveConnections() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	now := time.Now()
+	for ip, stats := range m.stats {
+		if now.Sub(stats.lastSeen) > m.connectionTimeout {
+			delete(m.stats, ip)
+			continue
+		}
+		stats.expireUDPFlows(now)
+	}
+}
+
+// GetStats 获取过滤后的IP流量统计（含协议/端口维度累计值）
+func (m *Monitor) GetStats() map[string]*TrafficStats {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	result := make(map[string]*TrafficStats)
+
+	for ip, stats := range m.stats {
+		// 检查IP是否在排除的子网中
+		if isIPExcluded(ip, m.excludeSubnets) {
+			continue
+		}
+		result[ip] = stats.toTrafficStats()
+	}
+
+	return result
+}
+
+// toTrafficStats 将内部统计转换为对外暴露的统计（深拷贝协议/端口维度）
 func (its *internalTrafficStats) toTrafficStats() *TrafficStats {
-	return &TrafficStats{
+	ts := &TrafficStats{
 		RemoteIP:        its.remoteIP,
 		LocalIP:         its.localIP,
 		BytesSent:       its.bytesSent,
@@ -511,5 +670,33 @@ func (its *internalTrafficStats) toTrafficStats() *TrafficStats {
 		LastSeen:        its.lastSeen,
 		FirstSeen:       its.firstSeen,
 		Connections:     its.connections,
+		ConnsIn:         its.connsIn,
+		ConnsOut:        its.connsOut,
+		Protocols:       make(map[string]*ProtoPortStats, len(its.protocols)),
+		Ports:           make(map[string]map[uint16]*ProtoPortStats, len(its.ports)),
+	}
+
+	for proto, p := range its.protocols {
+		ts.Protocols[proto] = p.toProtoPortStats()
+	}
+	for proto, pm := range its.ports {
+		inner := make(map[uint16]*ProtoPortStats, len(pm))
+		for port, p := range pm {
+			inner[port] = p.toProtoPortStats()
+		}
+		ts.Ports[proto] = inner
+	}
+
+	return ts
+}
+
+func (p *protoPortStats) toProtoPortStats() *ProtoPortStats {
+	return &ProtoPortStats{
+		BytesSent:   p.bytesSent,
+		BytesRecv:   p.bytesRecv,
+		PacketsSent: p.packetsSent,
+		PacketsRecv: p.packetsRecv,
+		ConnsIn:     p.connsIn,
+		ConnsOut:    p.connsOut,
 	}
 }

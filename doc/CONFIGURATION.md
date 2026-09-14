@@ -43,7 +43,24 @@ monitor:
   exclude_subnets: "127.0.0.1/8,10.0.0.0/8"  # 排除的子网
   window: 60  # 监控时间窗口（秒）
   timeout: 86400  # 连接超时时间（秒）
+  capture_filter: ""  # BPF捕获过滤器，留空使用默认 "tcp or udp or icmp or icmp6"
+  history_interval: 60  # 流量历史采样间隔（秒），0 表示禁用历史持久化
+  history_retention_days: 30  # 1小时聚合层历史保留天数，0 表示永久保留
 ```
+
+历史流量按三层阶梯降采样归档（raw：IP 维度 24h / IP×协议×端口维度 6h → 10 分钟聚合层 7 天 →
+1 小时聚合层 `history_retention_days` 天），查询时服务端自动路由合并，仪表盘最长可回溯 30 天。
+
+### 策略引擎配置 (policy)
+
+```yaml
+policy:
+  eval_interval: 10  # 策略评估间隔（秒），0 表示禁用策略引擎
+  risk_window: 86400  # 风险分统计窗口（秒，默认 24 小时）
+```
+
+策略（限速/临时封禁/风险标记）通过 Web 界面"策略管理"页面配置；触发记录为风险事件，
+风险分在 `risk_window` 窗口内累计，达到策略的升级阈值后自动临时封禁。
 
 ### 防火墙配置 (firewall)
 

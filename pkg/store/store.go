@@ -10,6 +10,10 @@ type Store struct {
 	IpNetStore         *IpNetStore
 	IpNetGroupStore    *IpNetGroupStore
 	TrafficSampleStore *TrafficSampleStore
+	TrafficPortStore   *TrafficPortSampleStore
+	TrafficRollupStore *TrafficRollupStore
+	PolicyStore        *PolicyStore
+	RiskEventStore     *RiskEventStore
 }
 
 func NewStore(cfg *config.DatabaseConfig) (*Store, error) {
@@ -21,17 +25,26 @@ func NewStore(cfg *config.DatabaseConfig) (*Store, error) {
 	}
 
 	// 自动迁移数据库表结构
-	if err := db.AutoMigrate(IpNet{}, IpNetGroup{}, TrafficSample{}); err != nil {
+	if err := db.AutoMigrate(
+		IpNet{},
+		IpNetGroup{},
+		TrafficSample{},
+		TrafficPortSample{},
+		TrafficIpRollup{},
+		TrafficPortRollup{},
+		Policy{},
+		RiskEvent{},
+	); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
 
-	ipNetStore := NewIpNetStore(db)
-	ipNetGroupStore := NewIpNetGroupStore(db)
-	trafficSampleStore := NewTrafficSampleStore(db)
-
 	return &Store{
-		IpNetStore:         ipNetStore,
-		IpNetGroupStore:    ipNetGroupStore,
-		TrafficSampleStore: trafficSampleStore,
+		IpNetStore:         NewIpNetStore(db),
+		IpNetGroupStore:    NewIpNetGroupStore(db),
+		TrafficSampleStore: NewTrafficSampleStore(db),
+		TrafficPortStore:   NewTrafficPortSampleStore(db),
+		TrafficRollupStore: NewTrafficRollupStore(db),
+		PolicyStore:        NewPolicyStore(db),
+		RiskEventStore:     NewRiskEventStore(db),
 	}, nil
 }

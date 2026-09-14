@@ -11,6 +11,11 @@ import {
   MenuItem,
   Select,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
@@ -21,11 +26,20 @@ import {
   Undo as UndoIcon,
   VerifiedUser as AllowIcon,
 } from '@mui/icons-material'
+import { DonutSmall as ProtoIcon } from '@mui/icons-material'
 import { ipApi } from '../api/ip'
 import { groupApi } from '../api/group'
 import { trafficApi } from '../api/traffic'
+import { riskApi } from '../api/policy'
 import { errorMessage } from '../api/client'
-import type { IpGroup, IpNetAction, TrafficData, TrafficHistoryPoint } from '../api/types'
+import type {
+  IpGroup,
+  IpNetAction,
+  PortStat,
+  RiskEvent,
+  TrafficData,
+  TrafficHistoryPoint,
+} from '../api/types'
 import { EChart } from './charts/EChart'
 import { ConfirmDialog, useConfirmDialog } from './ConfirmDialog'
 import { formatBytes, formatNumber, formatTimestamp } from '../utils/format'
@@ -57,6 +71,7 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
   const [groups, setGroups] = useState<IpGroup[]>([])
   const [groupId, setGroupId] = useState<number | ''>('')
   const [acting, setActing] = useState(false)
+  const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([])
 
   const { showConfirm, confirmState, handleConfirm, handleCancel } = useConfirmDialog()
 
@@ -95,6 +110,7 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
     if (!ip) {
       return
     }
+    setRiskEvents([])
     groupApi
       .list()
       .then((list) => {
@@ -102,6 +118,10 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
         setGroupId((list.find((g) => g.is_default) ?? list[0])?.id ?? '')
       })
       .catch(() => setGroups([]))
+    riskApi
+      .list({ ip, page_size: 20 })
+      .then((result) => setRiskEvents(result.items))
+      .catch(() => setRiskEvents([]))
   }, [ip])
 
   const chartOption = useMemo(() => {
@@ -186,7 +206,13 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
 
   const statusChip = () => {
     if (live?.rule_action === 'ban') {
-      return <Chip label="已封禁" color="error" size="small" />
+      return live.banned_until ? (
+        <Tooltip title={`临时封禁，${formatTimestamp(live.banned_until)} 自动解封`}>
+          <Chip label="临时封禁" color="error" size="small" />
+        </Tooltip>
+      ) : (
+        <Chip label="已封禁" color="error" size="small" />
+      )
     }
     if (live?.rule_action === 'allow') {
       return <Chip label="已加白" color="success" size="small" />
@@ -201,6 +227,21 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
     return <Chip label="未管控" size="small" />
   }
 
+  const riskLabel = () => {
+    const score = live?.risk_score ?? 0
+    const level = live?.risk_level ?? 'none'
+    if (score <= 0 || level === 'none') {
+      return null
+    }
+    const map = {
+      low: { label: `低风险 ${score}`, color: 'warning' as const },
+      medium: { label: `中风险 ${score}`, color: 'warning' as const },
+      high: { label: `高风险 ${score}`, color: 'error' as const },
+    }
+    const conf = map[level] ?? map.low
+    return <Chip label={conf.label} color={conf.color} size="small" variant="outlined" />
+  }
+
   return (
     <Drawer anchor="right" open={Boolean(ip)} onClose={onClose}>
       <Box sx={{ width: { xs: '100vw', sm: 480 }, p: 3 }} role="presentation">
@@ -208,7 +249,10 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
           <Typography variant="h6" sx={{ fontFamily: 'monospace' }}>
             {ip}
           </Typography>
-          {statusChip()}
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            {riskLabel()}
+            {statusChip()}
+          </Stack>
         </Stack>
         {live && (
           <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -228,6 +272,37 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
           <Stat label="累计收发" value={live ? formatBytes(live.total_bytes_in + live.total_bytes_out) : '-'} />
           <Stat label="连接数" value={live ? formatNumber(live.connections) : '-'} />
         </Box>
+
+        {(live?.protocols?.length ?? 0) > 0 && (
+          <>
+            <Typography variant="caption" color="text.secondary" gutterBottom sx={{ display: 'block' }}>
+              协议分布（累计流量）
+            </Typography>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+              {(live?.protocols ?? []).map((p) => (
+                <Tooltip key={p.proto} title={`${formatBytes(p.bytes_in)} ↓ / ${formatBytes(p.bytes_out)} ↑`}>
+                  <Chip
+                    label={`${p.proto} ${formatBytes(p.bytes_in + p.bytes_out)}`}
+                    size="small"
+                    variant="outlined"
+                    icon={<ProtoIcon sx={{ fontSize: 13 }} />}
+                  />
+                </Tooltip>
+              ))}
+            </Stack>
+          </>
+        )}
+
+        {(live?.ports?.length ?? 0) > 0 && (
+          <>
+            <Typography variant="caption" color="text.secondary" gutterBottom sx={{ display: 'block' }}>
+              端口明细（累计流量前 8）
+            </Typography>
+            <Box sx={{ maxHeight: 150, overflow: 'auto', mb: 1 }}>
+              <PortTable ports={live?.ports ?? []} />
+            </Box>
+          </>
+        )}
 
         <Divider sx={{ my: 2 }} />
 
@@ -256,6 +331,51 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
           </Typography>
         ) : (
           <EChart option={chartOption} height={240} />
+        )}
+
+        <Divider sx={{ my: 2 }} />
+
+        <Typography variant="subtitle2" gutterBottom>
+          风险事件
+          <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+            最近 20 条
+          </Typography>
+        </Typography>
+        {riskEvents.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ pb: 1 }}>
+            该 IP 暂无风险事件
+          </Typography>
+        ) : (
+          <Box sx={{ maxHeight: 200, overflow: 'auto', mb: 1 }}>
+            <Stack spacing={0.75}>
+              {riskEvents.map((event) => (
+                <Stack key={event.id} direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
+                  <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                    {formatTimestamp(new Date(event.ts * 1000).toISOString())}
+                  </Typography>
+                  <Chip
+                    label={
+                      event.action === 'auto_ban'
+                        ? '风险升级封禁'
+                        : event.action === 'ban'
+                          ? '触发封禁'
+                          : '风险标记'
+                    }
+                    size="small"
+                    color={event.action === 'mark' ? 'warning' : 'error'}
+                    variant={event.action === 'mark' ? 'outlined' : 'filled'}
+                    sx={{ height: 20, fontSize: 11 }}
+                  />
+                  <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                    {event.policy_name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {event.trigger_value}
+                  </Typography>
+                </Stack>
+              ))}
+            </Stack>
+          </Box>
         )}
 
         <Divider sx={{ my: 2 }} />
@@ -363,4 +483,31 @@ const Stat = ({ label, value }: { label: string; value: string }) => (
       {value}
     </Typography>
   </Box>
+)
+
+const PortTable = ({ ports }: { ports: PortStat[] }) => (
+  <Table size="small">
+    <TableHead>
+      <TableRow>
+        <TableCell sx={{ py: 0.25, fontSize: 11 }}>协议</TableCell>
+        <TableCell sx={{ py: 0.25, fontSize: 11 }}>端口</TableCell>
+        <TableCell sx={{ py: 0.25, fontSize: 11 }} align="right">下行</TableCell>
+        <TableCell sx={{ py: 0.25, fontSize: 11 }} align="right">上行</TableCell>
+        <TableCell sx={{ py: 0.25, fontSize: 11 }} align="right">连接</TableCell>
+      </TableRow>
+    </TableHead>
+    <TableBody>
+      {ports.map((p) => (
+        <TableRow key={`${p.proto}-${p.port}`}>
+          <TableCell sx={{ py: 0.25, fontSize: 12 }}>{p.proto}</TableCell>
+          <TableCell sx={{ py: 0.25, fontSize: 12, fontFamily: 'monospace' }}>
+            {p.port === 0 ? '其他' : p.port}
+          </TableCell>
+          <TableCell sx={{ py: 0.25, fontSize: 12 }} align="right">{formatBytes(p.bytes_in)}</TableCell>
+          <TableCell sx={{ py: 0.25, fontSize: 12 }} align="right">{formatBytes(p.bytes_out)}</TableCell>
+          <TableCell sx={{ py: 0.25, fontSize: 12 }} align="right">{formatNumber(p.conns)}</TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
 )

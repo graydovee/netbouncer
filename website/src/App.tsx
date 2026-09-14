@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext'
 import TrafficMonitor from './pages/TrafficMonitor'
 import IPManagement from './pages/ip/IPManagement'
 import GroupManagement from './pages/GroupManagement'
+import PolicyManagement from './pages/policy/PolicyManagement'
 import NotFound from './pages/NotFound'
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
               <Routes>
                 <Route path="/" element={<TrafficMonitor />} />
                 <Route path="/ip-management" element={<IPManagement />} />
+                <Route path="/policies" element={<PolicyManagement />} />
                 <Route path="/groups" element={<GroupManagement />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>

@@ -37,14 +37,14 @@ func (f *fakeFirewall) Init(ipList []store.IpNet) error {
 	f.initRules = ipList
 	return nil
 }
-func (f *fakeFirewall) Ban(ipNet string) error {
+func (f *fakeFirewall) Ban(ipNet string, direction string) error {
 	if err, ok := f.failOn[ipNet]; ok {
 		return err
 	}
 	f.banned[ipNet] = true
 	return nil
 }
-func (f *fakeFirewall) RevertBan(ipNet string) error {
+func (f *fakeFirewall) RevertBan(ipNet string, direction string) error {
 	delete(f.banned, ipNet)
 	return nil
 }
@@ -59,6 +59,14 @@ func (f *fakeFirewall) RevertAllow(ipNet string) error {
 	delete(f.allowed, ipNet)
 	return nil
 }
+func (f *fakeFirewall) ApplyRateLimit(rule core.RateLimitRule) error {
+	return nil
+}
+
+func (f *fakeFirewall) RemoveRateLimit(rule core.RateLimitRule) error {
+	return nil
+}
+
 func (f *fakeFirewall) CleanupIpNet(ipNet string) error {
 	delete(f.banned, ipNet)
 	delete(f.allowed, ipNet)

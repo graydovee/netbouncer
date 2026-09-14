@@ -26,12 +26,14 @@ func (f *fakeMonitor) GetStats() map[string]*core.TrafficStats {
 
 type fakeFirewall struct{}
 
-func (f *fakeFirewall) Init(ipList []store.IpNet) error { return nil }
-func (f *fakeFirewall) Ban(ipNet string) error          { return nil }
-func (f *fakeFirewall) RevertBan(ipNet string) error    { return nil }
-func (f *fakeFirewall) Allow(ipNet string) error        { return nil }
-func (f *fakeFirewall) RevertAllow(ipNet string) error  { return nil }
-func (f *fakeFirewall) CleanupIpNet(ipNet string) error { return nil }
+func (f *fakeFirewall) Init(ipList []store.IpNet) error                { return nil }
+func (f *fakeFirewall) Ban(ipNet string, direction string) error       { return nil }
+func (f *fakeFirewall) RevertBan(ipNet string, direction string) error { return nil }
+func (f *fakeFirewall) Allow(ipNet string) error                       { return nil }
+func (f *fakeFirewall) RevertAllow(ipNet string) error                 { return nil }
+func (f *fakeFirewall) ApplyRateLimit(rule core.RateLimitRule) error   { return nil }
+func (f *fakeFirewall) RemoveRateLimit(rule core.RateLimitRule) error  { return nil }
+func (f *fakeFirewall) CleanupIpNet(ipNet string) error                { return nil }
 
 // newTestServer 构造带真实存储与服务的测试服务器
 func newTestServer(t *testing.T) *Server {

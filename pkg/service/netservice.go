@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -23,11 +24,18 @@ type Monitor interface {
 // Firewall 防火墙接口，解耦对 *core.Firewall 的直接依赖，便于测试
 type Firewall interface {
 	Init(ipList []store.IpNet) error
-	Ban(ipNet string) error
-	RevertBan(ipNet string) error
+	Ban(ipNet string, direction string) error
+	RevertBan(ipNet string, direction string) error
 	Allow(ipNet string) error
 	RevertAllow(ipNet string) error
 	CleanupIpNet(ipNet string) error
+	ApplyRateLimit(rule core.RateLimitRule) error
+	RemoveRateLimit(rule core.RateLimitRule) error
+}
+
+// RiskProvider 提供各 IP 的风险分（由策略引擎实现）
+type RiskProvider interface {
+	RiskScore(ip string) int
 }
 
 // 编译期确认具体实现满足接口
@@ -41,6 +49,10 @@ type NetService struct {
 	firewall Firewall
 
 	store *store.Store
+
+	// riskProvider/portProvider 由策略引擎在装配时注入，可为 nil（引擎禁用时）
+	riskProvider RiskProvider
+	portProvider PortStatsProvider
 }
 
 func NewNetService(monitor Monitor, firewall Firewall, store *store.Store) *NetService {
@@ -49,6 +61,17 @@ func NewNetService(monitor Monitor, firewall Firewall, store *store.Store) *NetS
 		firewall: firewall,
 		store:    store,
 	}
+}
+
+// SetPolicyEngine 注入策略引擎（提供风险分与实时端口聚合）
+func (s *NetService) SetPolicyEngine(e *PolicyEngine) {
+	s.riskProvider = e
+	s.portProvider = e
+}
+
+// SetRiskProvider 注入风险分提供者
+func (s *NetService) SetRiskProvider(p RiskProvider) {
+	s.riskProvider = p
 }
 
 // Init 初始化服务
@@ -63,8 +86,8 @@ func (s *NetService) Init(items []config.RulesInitConfig) error {
 		}
 	}
 
-	// 从存储中加载所有已存在的IP
-	ips, err := s.store.IpNetStore.FindAll()
+	// 加载所有未过期的规则（过期临时封禁在引擎的清理循环中自动解除）
+	ips, err := s.store.IpNetStore.FindAllActive()
 	if err != nil {
 		return Internalf("加载IP规则失败: %v", err)
 	}
@@ -144,7 +167,7 @@ func (s *NetService) buildTrafficData(stats map[string]*core.TrafficStats) ([]Tr
 	for _, e := range rules {
 		if n := parseIpNet(e.IpNet); n != nil {
 			if ones, bits := n.Mask.Size(); ones == bits {
-				exact[n.IP.String()] = ruleRef{id: e.ID, action: e.Action}
+				exact[n.IP.String()] = ruleRef{id: e.ID, action: e.Action, expiresAt: e.ExpiresAt}
 			}
 		}
 	}
@@ -152,7 +175,8 @@ func (s *NetService) buildTrafficData(stats map[string]*core.TrafficStats) ([]Tr
 	trafficData := make([]TrafficData, 0, len(stats))
 	for _, stat := range stats {
 		ref := exact[stat.RemoteIP]
-		trafficData = append(trafficData, TrafficData{
+
+		item := TrafficData{
 			RemoteIP:        stat.RemoteIP,
 			LocalIP:         stat.LocalIP,
 			TotalBytesIn:    stat.BytesRecv,
@@ -167,15 +191,89 @@ func (s *NetService) buildTrafficData(stats map[string]*core.TrafficStats) ([]Tr
 			IsBanned:        IsBanned(bannedIpNets, allowIpNets, stat.RemoteIP),
 			RuleAction:      ref.action,
 			RuleID:          ref.id,
-		})
+			Protocols:       convertProtoStats(stat.Protocols),
+			Ports:           convertPortStats(stat.Ports, topPortsPerIP),
+		}
+		if ref.expiresAt != nil {
+			item.BannedUntil = ref.expiresAt.Format(time.RFC3339)
+		}
+		if s.riskProvider != nil {
+			item.RiskScore = s.riskProvider.RiskScore(stat.RemoteIP)
+			item.RiskLevel = riskLevel(item.RiskScore)
+		}
+		trafficData = append(trafficData, item)
 	}
 	return trafficData, nil
 }
 
+// topPortsPerIP 实时接口中每个 IP 返回的端口明细条数上限
+const topPortsPerIP = 8
+
+// riskLevel 风险分到风险等级的映射
+func riskLevel(score int) string {
+	switch {
+	case score >= 6:
+		return "high"
+	case score >= 3:
+		return "medium"
+	case score >= 1:
+		return "low"
+	}
+	return "none"
+}
+
+func convertProtoStats(protocols map[string]*core.ProtoPortStats) []ProtoStat {
+	if len(protocols) == 0 {
+		return nil
+	}
+	result := make([]ProtoStat, 0, len(protocols))
+	for proto, p := range protocols {
+		result = append(result, ProtoStat{
+			Proto:      proto,
+			BytesIn:    p.BytesRecv,
+			BytesOut:   p.BytesSent,
+			PacketsIn:  p.PacketsRecv,
+			PacketsOut: p.PacketsSent,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].BytesIn+result[i].BytesOut > result[j].BytesIn+result[j].BytesOut
+	})
+	return result
+}
+
+func convertPortStats(ports map[string]map[uint16]*core.ProtoPortStats, top int) []PortStat {
+	if len(ports) == 0 {
+		return nil
+	}
+	result := make([]PortStat, 0, len(ports)*2)
+	for proto, pm := range ports {
+		for port, p := range pm {
+			result = append(result, PortStat{
+				Proto:      proto,
+				Port:       int(port),
+				BytesIn:    p.BytesRecv,
+				BytesOut:   p.BytesSent,
+				PacketsIn:  p.PacketsRecv,
+				PacketsOut: p.PacketsSent,
+				Conns:      int(p.ConnsIn + p.ConnsOut),
+			})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].BytesIn+result[i].BytesOut > result[j].BytesIn+result[j].BytesOut
+	})
+	if len(result) > top {
+		result = result[:top]
+	}
+	return result
+}
+
 // ruleRef 精确命中规则的引用
 type ruleRef struct {
-	id     uint
-	action string
+	id        uint
+	action    string
+	expiresAt *time.Time
 }
 
 // GetStats 获取（排除网段后的）IP流量统计
@@ -187,6 +285,18 @@ func (s *NetService) GetStats() ([]TrafficData, error) {
 // CreateOrUpdateIpNet 创建或更新IP网络
 // 如果IP网络已存在，则更新action, 忽略组信息
 func (s *NetService) CreateOrUpdateIpNet(ipnet string, groupId uint, action string) error {
+	return s.CreateOrUpdateIpNetWithOptions(ipnet, groupId, action, IpNetMutateOptions{})
+}
+
+// IpNetMutateOptions 创建/更新 IP 规则时的可选项（零值字段取默认值）
+type IpNetMutateOptions struct {
+	Direction string     // in/out/both，空视为 in
+	ExpiresAt *time.Time // 非 nil 表示临时封禁
+	Source    string     // 规则来源，空视为 manual
+}
+
+// CreateOrUpdateIpNetWithOptions 带选项的创建或更新
+func (s *NetService) CreateOrUpdateIpNetWithOptions(ipnet string, groupId uint, action string, opts IpNetMutateOptions) error {
 	if !isValidAction(action) {
 		return Invalidf("不支持的防火墙动作: %s", action)
 	}
@@ -209,17 +319,21 @@ func (s *NetService) CreateOrUpdateIpNet(ipnet string, groupId uint, action stri
 	}
 
 	if s.store.IpNetStore.ExistsByIpNet(ipnet) {
-		// 如果IP网络已存在，则更新action, 忽略组信息
+		// 如果IP网络已存在，则更新action与可选项, 忽略组信息
 		ipNet, err := s.store.IpNetStore.FindByIpNet(ipnet)
 		if err != nil {
 			return Internalf("查询IP规则失败: %v", err)
 		}
 
-		return s.UpdateIpNetAction(ipNet.ID, action)
+		return s.updateIpNetRecord(ipNet, action, opts)
 	}
 
 	// 创建IP网络记录
-	ipNet, err := s.store.IpNetStore.Create(ipnet, groupId, action)
+	ipNet, err := s.store.IpNetStore.CreateWithOptions(ipnet, groupId, action, store.IpNetOptions{
+		Direction: opts.Direction,
+		ExpiresAt: opts.ExpiresAt,
+		Source:    opts.Source,
+	})
 	if err != nil {
 		return Internalf("创建IP规则失败: %v", err)
 	}
@@ -229,6 +343,38 @@ func (s *NetService) CreateOrUpdateIpNet(ipnet string, groupId uint, action stri
 	}
 
 	return nil
+}
+
+// BanTemporary 策略触发的临时封禁：已存在规则时改写为临时封禁，到期由引擎自动解封
+func (s *NetService) BanTemporary(ipnet string, direction string, expires time.Time, source string) error {
+	return s.CreateOrUpdateIpNetWithOptions(ipnet, 0, store.ActionBan, IpNetMutateOptions{
+		Direction: direction,
+		ExpiresAt: &expires,
+		Source:    source,
+	})
+}
+
+// CleanupExpiredTempBans 解除所有已过期的临时封禁，返回解除数量
+func (s *NetService) CleanupExpiredTempBans() (int, error) {
+	expired, err := s.store.IpNetStore.FindExpired(time.Now())
+	if err != nil {
+		return 0, Internalf("查询过期临时封禁失败: %v", err)
+	}
+
+	removed := 0
+	for _, ipNet := range expired {
+		if err := s.firewall.RevertBan(ipNet.IpNet, ipNet.Direction); err != nil {
+			slog.Error("解除过期临时封禁失败", "ipnet", ipNet.IpNet, "error", err)
+			continue
+		}
+		if err := s.store.IpNetStore.DeleteByID(ipNet.ID); err != nil {
+			slog.Error("删除过期临时封禁记录失败", "ipnet", ipNet.IpNet, "error", err)
+			continue
+		}
+		removed++
+		slog.Info("临时封禁已到期自动解封", "ipnet", ipNet.IpNet, "expired_at", ipNet.ExpiresAt.Format(time.RFC3339))
+	}
+	return removed, nil
 }
 
 // getGroup 按ID查询组，不存在时返回 ErrNotFound
@@ -247,10 +393,48 @@ func isValidAction(action string) bool {
 	return action == store.ActionBan || action == store.ActionAllow
 }
 
+func isValidDirection(direction string) bool {
+	return direction == store.DirectionIn || direction == store.DirectionOut || direction == store.DirectionBoth
+}
+
+// updateIpNetRecord 更新已存在记录的动作与可选项；动作或方向变化时先撤销旧规则再应用新规则
+func (s *NetService) updateIpNetRecord(ipNet *store.IpNet, action string, opts IpNetMutateOptions) error {
+	newDirection := opts.Direction
+	if newDirection == "" {
+		newDirection = store.DirectionIn
+	}
+
+	needRevert := action != ipNet.Action || newDirection != ipNet.Direction
+	if needRevert {
+		if err := s.revertAction(ipNet); err != nil {
+			return Internalf("撤销原有行为失败: %v", err)
+		}
+	}
+
+	if err := s.store.IpNetStore.UpdateWithOptions(ipNet.ID, action, store.IpNetOptions{
+		Direction: opts.Direction,
+		ExpiresAt: opts.ExpiresAt,
+		Source:    opts.Source,
+	}); err != nil {
+		return Internalf("更新IP规则失败: %v", err)
+	}
+	ipNet.Action = action
+	ipNet.Direction = newDirection
+	ipNet.ExpiresAt = opts.ExpiresAt
+	ipNet.Source = opts.Source
+
+	if needRevert {
+		if err := s.applyAction(ipNet); err != nil {
+			return Internalf("应用新行为失败: %v", err)
+		}
+	}
+	return nil
+}
+
 func (s *NetService) applyAction(ipNet *store.IpNet) error {
 	switch ipNet.Action {
 	case store.ActionBan:
-		return s.firewall.Ban(ipNet.IpNet)
+		return s.firewall.Ban(ipNet.IpNet, ipNet.Direction)
 	case store.ActionAllow:
 		return s.firewall.Allow(ipNet.IpNet)
 	default:
@@ -261,7 +445,7 @@ func (s *NetService) applyAction(ipNet *store.IpNet) error {
 func (s *NetService) revertAction(ipNet *store.IpNet) error {
 	switch ipNet.Action {
 	case store.ActionBan:
-		return s.firewall.RevertBan(ipNet.IpNet)
+		return s.firewall.RevertBan(ipNet.IpNet, ipNet.Direction)
 	case store.ActionAllow:
 		return s.firewall.RevertAllow(ipNet.IpNet)
 	default:
@@ -333,25 +517,16 @@ func (s *NetService) UpdateIpNetAction(id uint, action string) error {
 		return Internalf("查询IP规则失败: %v", err)
 	}
 
-	if action == ipNet.Action {
+	if action == ipNet.Action && ipNet.ExpiresAt == nil {
 		return nil
 	}
 
-	if err := s.revertAction(ipNet); err != nil {
-		return Internalf("撤销原有行为失败: %v", err)
-	}
-
-	ipNet.Action = action
-
-	if err := s.applyAction(ipNet); err != nil {
-		return Internalf("应用新行为失败: %v", err)
-	}
-
-	if err := s.store.IpNetStore.UpdateAction(id, action); err != nil {
-		return Internalf("更新IP行为失败: %v", err)
-	}
-
-	return nil
+	// 手动操作视为永久规则：清除临时封禁的过期时间与策略来源标记
+	return s.updateIpNetRecord(ipNet, action, IpNetMutateOptions{
+		Direction: ipNet.Direction,
+		ExpiresAt: nil,
+		Source:    "manual",
+	})
 }
 
 // UpdateIpNetActions 批量更新IP规则的动作，返回成功数量
@@ -463,14 +638,20 @@ func (s *NetService) getGroupMap() (map[uint]*IpGroup, error) {
 }
 
 func convertToIpNetItem(ip store.IpNet, groupMap map[uint]*IpGroup) IpNet {
-	return IpNet{
+	item := IpNet{
 		ID:        ip.ID,
 		IpNet:     ip.IpNet,
 		CreatedAt: ip.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: ip.UpdatedAt.Format(time.RFC3339),
 		Group:     groupMap[ip.GroupID],
 		Action:    ip.Action,
+		Direction: ip.Direction,
+		Source:    ip.Source,
 	}
+	if ip.ExpiresAt != nil {
+		item.ExpiresAt = ip.ExpiresAt.Format(time.RFC3339)
+	}
+	return item
 }
 
 func (s *NetService) ListAllGroups() ([]IpGroup, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"gorm.io/driver/sqlite"
@@ -82,6 +83,15 @@ func (l *SlogLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql 
 	}
 }
 
+// appendSQLitePragmas 为 DSN 追加 WAL/busy_timeout/synchronous 参数（幂等）
+func appendSQLitePragmas(dsn string) string {
+	pragmas := "_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL"
+	if strings.Contains(dsn, "?") {
+		return dsn + "&" + pragmas
+	}
+	return dsn + "?" + pragmas
+}
+
 // NewDatabase 根据配置创建数据库连接（当前仅支持 sqlite）
 func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 	if cfg.Driver != "sqlite" {
@@ -95,6 +105,10 @@ func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 		}
 		dsn = cfg.Database
 	}
+
+	// 历史采样为高频小事务写入，启用 WAL + NORMAL 同步提升吞吐，
+	// 并设置 busy_timeout 避免读写并发时立即报 SQLITE_BUSY
+	dsn = appendSQLitePragmas(dsn)
 
 	slog.Info("使用数据库", "driver", cfg.Driver, "file", dsn)
 

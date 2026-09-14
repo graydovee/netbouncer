@@ -48,7 +48,7 @@ func newSamplerEnv(t *testing.T) (*Sampler, *mutableMonitor, *store.TrafficSampl
 		t.Fatalf("create store: %v", err)
 	}
 	mon := &mutableMonitor{stats: map[string]*core.TrafficStats{}}
-	s := NewSampler(mon, st.TrafficSampleStore, time.Minute, 24*time.Hour)
+	s := NewSampler(mon, st.TrafficSampleStore, st.TrafficPortStore, time.Minute)
 	return s, mon, st.TrafficSampleStore
 }
 
@@ -129,5 +129,94 @@ func TestSamplerIPDisappeared(t *testing.T) {
 	}
 	if totalIn != 0 {
 		t.Errorf("total in = %d, want 0", totalIn)
+	}
+}
+
+// 设置某 IP 的端口维度统计
+func (m *mutableMonitor) setPorts(ip string, ports map[string]map[uint16]*core.ProtoPortStats) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stats[ip] = &core.TrafficStats{RemoteIP: ip, Ports: ports}
+}
+
+func TestSamplerPortIncrement(t *testing.T) {
+	s, mon, _ := newSamplerEnv(t)
+	portStore := s.ports
+
+	// 第一次采样：基线未知，端口增量记 0
+	mon.setPorts("2.2.2.2", map[string]map[uint16]*core.ProtoPortStats{
+		"tcp": {
+			443: {BytesRecv: 1000, BytesSent: 500, PacketsRecv: 10, PacketsSent: 5},
+			80:  {BytesRecv: 100, BytesSent: 50},
+		},
+	})
+	if err := s.sampleOnce(); err != nil {
+		t.Fatalf("sample: %v", err)
+	}
+
+	// 第二次采样：各端口增量独立计算
+	mon.setPorts("2.2.2.2", map[string]map[uint16]*core.ProtoPortStats{
+		"tcp": {
+			443: {BytesRecv: 3000, BytesSent: 1500, PacketsRecv: 30, PacketsSent: 15},
+			80:  {BytesRecv: 100, BytesSent: 50}, // 无增量
+		},
+	})
+	if err := s.sampleOnce(); err != nil {
+		t.Fatalf("sample: %v", err)
+	}
+
+	points, err := portStore.QueryHistory(0, time.Now().Unix()+60, 60, store.PortHistoryFilter{Proto: "tcp", Port: 443})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	var delta int64
+	for _, p := range points {
+		delta += int64(p.BytesIn)
+	}
+	if delta != 2000 {
+		t.Fatalf("tcp/443 入站增量 = %d, want 2000", delta)
+	}
+
+	// 端口 80 无增量，总量应为 0
+	points, err = portStore.QueryHistory(0, time.Now().Unix()+60, 60, store.PortHistoryFilter{Proto: "tcp", Port: 80})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	var total uint64
+	for _, p := range points {
+		total += p.BytesIn + p.BytesOut
+	}
+	if total != 0 {
+		t.Fatalf("tcp/80 应无增量: got %d", total)
+	}
+}
+
+func TestSamplerPortCounterReset(t *testing.T) {
+	s, mon, _ := newSamplerEnv(t)
+
+	mon.setPorts("3.3.3.3", map[string]map[uint16]*core.ProtoPortStats{
+		"udp": {53: {BytesRecv: 5000, BytesSent: 1000}},
+	})
+	if err := s.sampleOnce(); err != nil {
+		t.Fatalf("sample: %v", err)
+	}
+	// 计数器回绕（IP 条目被淘汰重建）
+	mon.setPorts("3.3.3.3", map[string]map[uint16]*core.ProtoPortStats{
+		"udp": {53: {BytesRecv: 700, BytesSent: 100}},
+	})
+	if err := s.sampleOnce(); err != nil {
+		t.Fatalf("sample: %v", err)
+	}
+
+	points, err := s.ports.QueryHistory(0, time.Now().Unix()+60, 60, store.PortHistoryFilter{Proto: "udp", Port: 53})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	var delta int64
+	for _, p := range points {
+		delta += int64(p.BytesIn)
+	}
+	if delta != 700 {
+		t.Fatalf("计数器重置后增量 = %d, want 700", delta)
 	}
 }

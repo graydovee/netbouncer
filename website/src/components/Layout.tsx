@@ -31,6 +31,7 @@ import {
   Logout as LogoutIcon,
   Monitor as MonitorIcon,
   Menu as MenuIcon,
+  Policy as PolicyIcon,
 } from '@mui/icons-material'
 import { useAuth } from '../context/AuthContext'
 import { useColorMode } from '../theme'
@@ -46,6 +47,7 @@ interface MenuItem_ {
 const menuItems: MenuItem_[] = [
   { text: '流量监控', icon: <MonitorIcon />, path: '/' },
   { text: 'IP 管理', icon: <BlockIcon />, path: '/ip-management' },
+  { text: '策略管理', icon: <PolicyIcon />, path: '/policies' },
   { text: '组管理', icon: <GroupIcon />, path: '/groups' },
 ]
 

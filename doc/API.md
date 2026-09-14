@@ -100,10 +100,20 @@ GET /api/traffic
 - `is_banned`: 是否命中封禁规则（含被网段规则覆盖的情况）
 - `rule_action`: 精确命中该 IP 的规则动作（`""`/`ban`/`allow`），被网段规则覆盖时为空
 - `rule_id`: 精确命中规则的 ID，`0` 表示无精确规则
+- `banned_until`: 临时封禁到期时间（ISO 8601），空 = 永久封禁或未封禁
+- `risk_score` / `risk_level`: 策略触发的风险分与等级（`none`/`low`/`medium`/`high`）
+- `protocols`: 协议维度累计统计（`proto` + `bytes_in/out`、`packets_in/out`）
+- `ports`: 端口维度累计统计（`proto` + `port`，按流量取前 8 条；`port=0` 表示"其他/未分类"）
+
+> 协议支持 `tcp`/`udp`/`icmp`/`other`，端口为目标端口（收包=本机服务端口，发包=对端服务端口）。
 
 ### 查询流量历史趋势
 
 按时间桶聚合查询历史流量（由采样器按 `monitor.history_interval` 周期写入，存区间增量）。
+
+历史数据按三层阶梯降采样归档：raw 层（IP 维度保留 24h）、10 分钟聚合层（保留 7 天）、
+1 小时聚合层（保留 `monitor.history_retention_days` 天）。服务端按查询范围自动路由合并，
+因此最大查询跨度为 **30 天**；超出 raw 保留窗口的区间，实际粒度不小于所选聚合层的桶宽。
 
 **请求**
 ```http
@@ -114,7 +124,7 @@ GET /api/traffic/history?start=1735689600&end=1735776000&bucket=900&ip=1.2.3.4
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `start` | int | 开始时间（unix 秒），默认 24 小时前 |
+| `start` | int | 开始时间（unix 秒），默认 24 小时前；最大跨度 30 天 |
 | `end` | int | 结束时间（unix 秒），默认当前时间 |
 | `bucket` | int | 聚合桶宽（秒），范围 [10, 86400]，默认 300 |
 | `ip` | string | 可选，仅查询该 IP 的曲线；不传则为全服汇总 |
@@ -153,6 +163,197 @@ GET /api/traffic/history/top?start=1735689600&end=1735776000&limit=10
   ]
 }
 ```
+
+### 获取实时端口排行
+
+跨 IP 聚合的端口维度实时统计，由策略引擎评估循环（`policy.eval_interval`）刷新。
+
+**请求**
+```http
+GET /api/traffic/ports
+```
+
+**响应**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "proto": "tcp",
+      "port": 443,
+      "bytes_in": 104857600,
+      "bytes_out": 26214400,
+      "bytes_in_per_sec": 104857.6,
+      "bytes_out_per_sec": 26214.4,
+      "ip_count": 12,
+      "new_conns": 35,
+      "top_clients": ["1.2.3.4", "5.6.7.8"]
+    }
+  ]
+}
+```
+
+### 查询端口维度历史趋势
+
+按时间桶聚合查询端口维度的历史流量，返回按 `(proto, port)` 分组的分桶序列。
+
+**请求**
+```http
+GET /api/traffic/history/ports?start=1735689600&end=1735776000&bucket=900&proto=tcp&port=443
+```
+
+**查询参数**：`start`、`end`、`bucket` 同上；`proto`（tcp/udp/icmp，可选）、`port`（可选，`0` 表示"其他"）、`ip`（可选，过滤单个远程 IP）。
+
+**响应**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    { "ts": 1735690200, "proto": "tcp", "port": 443, "bytes_in": 1048576, "bytes_out": 262144, "packets_in": 1024, "packets_out": 512 }
+  ]
+}
+```
+
+### 查询端口维度流量 Top 榜
+
+```http
+GET /api/traffic/history/ports/top?start=1735689600&end=1735776000&limit=10
+```
+
+**响应** `data` 为 `{ "proto": "tcp", "port": 443, "bytes_in": ..., "bytes_out": ..., "bytes_sum": ... }` 数组。
+
+### 查询协议维度历史趋势
+
+按时间桶聚合查询协议维度的历史流量（所有端口行上卷到协议维度）。
+
+```http
+GET /api/traffic/history/protocols?start=1735689600&end=1735776000&bucket=900
+```
+
+**响应** `data` 为 `{ "ts": ..., "proto": "tcp", "bytes_in": ..., "bytes_out": ..., "packets_in": ..., "packets_out": ... }` 数组。
+
+## 策略 API
+
+策略由策略引擎按 `policy.eval_interval` 周期评估：命中触发条件后按动作执行
+（`rate_limit` 内核限速 / `ban` 临时封禁 / `mark` 风险标记），并记录风险事件；
+风险分在 `policy.risk_window` 窗口内累计，达到阈值自动升级临时封禁。
+
+### 策略对象
+
+```json
+{
+  "id": 1,
+  "name": "SSH 爆破防护",
+  "enabled": true,
+  "created_at": "2024-01-01T10:00:00Z",
+  "updated_at": "2024-01-01T10:00:00Z",
+  "direction": "in",
+  "protocol": "tcp",
+  "port": 22,
+  "rate_kbps": 0,
+  "total_mb": 0,
+  "conn_rate": 30,
+  "distinct_ports": 0,
+  "window_sec": 60,
+  "action": "ban",
+  "limit_kbps": 0,
+  "burst_kbps": 0,
+  "ban_sec": 1800,
+  "risk_score": 1,
+  "risk_ban_threshold": 3,
+  "risk_ban_sec": 86400,
+  "cooldown_sec": 600
+}
+```
+
+**字段说明**
+- 匹配：`direction`（`in`/`out`/`both`）、`protocol`（`any`/`tcp`/`udp`）、`port`（0 = 任意端口）
+- 触发（任一超限即触发，0 = 不启用）：`rate_kbps`（窗口均速）、`total_mb`（窗口累计）、
+  `conn_rate`（窗口内新建连接数）、`distinct_ports`（窗口内触碰端口数，仅 `port=0` 时有效，用于扫描检测）、`window_sec`
+- 动作：`rate_limit`（需 `limit_kbps`；`burst_kbps` 默认 2 倍限速值）、`ban`（需 `ban_sec`）、`mark`
+- 风险升级：`risk_score`（每次触发累加的风险分）、`risk_ban_threshold` + `risk_ban_sec`
+  （同时设置启用升级）、`cooldown_sec`（同 IP 两次触发的最小间隔，0 视为 300）
+
+### 获取策略列表
+
+```http
+GET /api/policy
+```
+
+### 创建策略
+
+```http
+POST /api/policy
+Content-Type: application/json
+
+{ "name": "SSH 爆破防护", "direction": "in", "protocol": "tcp", "port": 22,
+  "conn_rate": 30, "window_sec": 60, "action": "ban", "ban_sec": 1800,
+  "risk_score": 1, "cooldown_sec": 600, "risk_ban_threshold": 3, "risk_ban_sec": 86400 }
+```
+
+### 更新策略
+
+```http
+PUT /api/policy/:id
+```
+
+请求体同创建。限速类策略更新后会自动重新装卸内核规则。
+
+### 删除策略
+
+```http
+DELETE /api/policy/:id
+```
+
+### 启用/停用策略
+
+```http
+PUT /api/policy/:id/enabled
+Content-Type: application/json
+
+{ "enabled": false }
+```
+
+### 查询风险事件
+
+```http
+GET /api/risk/events?ip=1.2.3.4&page=1&page_size=20
+```
+
+**查询参数**
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `ip` | string | 可选，过滤单个远程 IP |
+| `page` | int | 页码，默认 1 |
+| `page_size` | int | 每页条数，默认 20，最大 100 |
+
+**响应**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "id": 100,
+        "remote_ip": "1.2.3.4",
+        "ts": 1735690200,
+        "policy_id": 1,
+        "policy_name": "SSH 爆破防护",
+        "trigger_value": "42次连接 ≥ 30次/60s",
+        "action": "ban",
+        "score": 1
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+`action` 取值：`mark`（风险标记）、`ban`（策略触发的临时封禁）、`auto_ban`（风险分达到阈值后的自动升级封禁）。
 
 ## IP 管理 API
 

@@ -52,7 +52,12 @@ func init() {
 	rootCmd.Flags().IntVarP(&cfg.Monitor.Window, "monitor-window", "w", cfg.Monitor.Window, "监控时间窗口（秒）")
 	rootCmd.Flags().IntVarP(&cfg.Monitor.Timeout, "monitor-timeout", "t", cfg.Monitor.Timeout, "连接超时时间（秒）")
 	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryInterval, "monitor-history-interval", cfg.Monitor.HistoryInterval, "流量历史采样间隔（秒），0 表示禁用")
-	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryRetentionDays, "monitor-history-retention-days", cfg.Monitor.HistoryRetentionDays, "流量历史保留天数，0 表示永久保留")
+	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryRetentionDays, "monitor-history-retention-days", cfg.Monitor.HistoryRetentionDays, "1小时聚合层历史保留天数，0 表示永久保留")
+	rootCmd.Flags().StringVar(&cfg.Monitor.CaptureFilter, "monitor-capture-filter", cfg.Monitor.CaptureFilter, "BPF捕获过滤器（留空使用默认 tcp or udp or icmp or icmp6）")
+
+	// 策略引擎配置
+	rootCmd.Flags().IntVar(&cfg.Policy.EvalInterval, "policy-eval-interval", cfg.Policy.EvalInterval, "策略评估间隔（秒），0 表示禁用策略引擎")
+	rootCmd.Flags().IntVar(&cfg.Policy.RiskWindow, "policy-risk-window", cfg.Policy.RiskWindow, "风险分统计窗口（秒）")
 
 	// 防火墙配置
 	rootCmd.Flags().StringVarP(&cfg.Firewall.Chain, "firewall-chain", "n", cfg.Firewall.Chain, "iptables链名称")
@@ -141,6 +146,13 @@ func run(cmd *cobra.Command) error {
 		},
 		"monitor-history-retention-days": func(c *config.Config, v string) error {
 			return parseIntFlag(v, func(n int) { c.Monitor.HistoryRetentionDays = n })
+		},
+		"monitor-capture-filter": func(c *config.Config, v string) error { c.Monitor.CaptureFilter = v; return nil },
+		"policy-eval-interval": func(c *config.Config, v string) error {
+			return parseIntFlag(v, func(n int) { c.Policy.EvalInterval = n })
+		},
+		"policy-risk-window": func(c *config.Config, v string) error {
+			return parseIntFlag(v, func(n int) { c.Policy.RiskWindow = n })
 		},
 		"firewall-chain": func(c *config.Config, v string) error { c.Firewall.Chain = v; return nil },
 		"firewall-ipset": func(c *config.Config, v string) error { c.Firewall.IpSet = v; return nil },
@@ -241,11 +253,21 @@ func run(cmd *cobra.Command) error {
 		sampler := service.NewSampler(
 			mon,
 			st.TrafficSampleStore,
+			st.TrafficPortStore,
 			time.Duration(cfg.Monitor.HistoryInterval)*time.Second,
-			time.Duration(cfg.Monitor.HistoryRetentionDays)*24*time.Hour,
 		)
 		sampler.Start(ctx)
 	}
+
+	// 降采样滚动任务（raw → 10分钟层 → 1小时层归档与保留期清理）
+	retention := time.Duration(cfg.Monitor.HistoryRetentionDays) * 24 * time.Hour
+	rollup := service.NewRollup(st, retention, retention)
+	rollup.Start(ctx)
+
+	// 策略引擎（eval_interval=0 时禁用）
+	engine := service.NewPolicyEngine(mon, fw, svc, st, &cfg.Policy)
+	svc.SetPolicyEngine(engine)
+	engine.Start(ctx)
 
 	server := web.NewServer(svc, authHandler)
 

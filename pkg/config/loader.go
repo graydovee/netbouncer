@@ -49,7 +49,11 @@ func DefaultConfig() *Config {
 			Window:               30,
 			Timeout:              60 * 60 * 24, // 24小时
 			HistoryInterval:      60,           // 60秒采样一次
-			HistoryRetentionDays: 30,           // 保留30天
+			HistoryRetentionDays: 30,           // 1小时聚合层保留30天
+		},
+		Policy: PolicyConfig{
+			EvalInterval: 10,           // 10秒评估一次
+			RiskWindow:   24 * 60 * 60, // 风险分窗口24小时
 		},
 		Firewall: FirewallConfig{
 			Chain: "NETBOUNCER",

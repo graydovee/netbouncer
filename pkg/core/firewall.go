@@ -43,15 +43,30 @@ func NewFirewallFromConfig(cfg *config.FirewallConfig) (*Firewall, error) {
 	return NewFirewall(core), nil
 }
 
+// RateLimitRule 内核级每 IP 限速规则（hashlimit 令牌桶，超限丢包）
+type RateLimitRule struct {
+	ID        uint    // 规则标识（策略ID），用于 hashlimit-name
+	Protocol  string  // tcp|udp；Port>0 时必须指定
+	Port      uint16  // 0 = 任意端口
+	RateKBps  float64 // 限速值 KB/s
+	BurstKBps float64 // 突发容量 KB/s，0 = 2×RateKBps
+	Direction string  // in|out|both
+}
+
 // FirewallCore 定义防火墙核心操作接口
 type FirewallCore interface {
 	// 初始化防火墙规则
 	InitRules() error
 
-	Ban(ipNet string) error
-	RevertBan(ipNet string) error
+	// direction: in（入站）/out（出站）/both
+	Ban(ipNet string, direction string) error
+	RevertBan(ipNet string, direction string) error
 	Allow(ipNet string) error
 	RevertAllow(ipNet string) error
+
+	// 内核级限速规则的装卸（策略动作 rate_limit）
+	ApplyRateLimit(rule RateLimitRule) error
+	RemoveRateLimit(rule RateLimitRule) error
 
 	// 清理Ip的防火墙规则
 	CleanupIpNetRules(ipNet string) error
@@ -80,7 +95,7 @@ func (f *Firewall) Init(ipList []store.IpNet) error {
 		var err error
 		switch ipnet.Action {
 		case store.ActionBan:
-			err = f.core.Ban(ipnet.IpNet)
+			err = f.core.Ban(ipnet.IpNet, ipnet.Direction)
 		case store.ActionAllow:
 			err = f.core.Allow(ipnet.IpNet)
 		default:
@@ -95,12 +110,12 @@ func (f *Firewall) Init(ipList []store.IpNet) error {
 	return nil
 }
 
-func (f *Firewall) Ban(ipNet string) error {
-	return f.core.Ban(ipNet)
+func (f *Firewall) Ban(ipNet string, direction string) error {
+	return f.core.Ban(ipNet, direction)
 }
 
-func (f *Firewall) RevertBan(ipNet string) error {
-	return f.core.RevertBan(ipNet)
+func (f *Firewall) RevertBan(ipNet string, direction string) error {
+	return f.core.RevertBan(ipNet, direction)
 }
 
 func (f *Firewall) Allow(ipNet string) error {
@@ -109,6 +124,14 @@ func (f *Firewall) Allow(ipNet string) error {
 
 func (f *Firewall) RevertAllow(ipNet string) error {
 	return f.core.RevertAllow(ipNet)
+}
+
+func (f *Firewall) ApplyRateLimit(rule RateLimitRule) error {
+	return f.core.ApplyRateLimit(rule)
+}
+
+func (f *Firewall) RemoveRateLimit(rule RateLimitRule) error {
+	return f.core.RemoveRateLimit(rule)
 }
 
 func (f *Firewall) CleanupIpNet(ipNet string) error {
@@ -127,11 +150,11 @@ func (m *MockFirewallCore) InitRules() error {
 	return nil
 }
 
-func (m *MockFirewallCore) Ban(ipNet string) error {
+func (m *MockFirewallCore) Ban(ipNet string, direction string) error {
 	return nil
 }
 
-func (m *MockFirewallCore) RevertBan(ipNet string) error {
+func (m *MockFirewallCore) RevertBan(ipNet string, direction string) error {
 	return nil
 }
 
@@ -140,6 +163,14 @@ func (m *MockFirewallCore) Allow(ipNet string) error {
 }
 
 func (m *MockFirewallCore) RevertAllow(ipNet string) error {
+	return nil
+}
+
+func (m *MockFirewallCore) ApplyRateLimit(rule RateLimitRule) error {
+	return nil
+}
+
+func (m *MockFirewallCore) RemoveRateLimit(rule RateLimitRule) error {
 	return nil
 }
 

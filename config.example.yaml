@@ -6,8 +6,15 @@ monitor:
   exclude_subnets: "127.0.0.1/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"  # 排除的子网（逗号分隔）
   window: 60  # 监控时间窗口（秒）
   timeout: 86400  # 连接超时时间（秒，24小时）
+  capture_filter: ""  # BPF捕获过滤器，留空使用默认 "tcp or udp or icmp or icmp6"
   history_interval: 60  # 流量历史采样间隔（秒），0 表示禁用历史持久化
-  history_retention_days: 30  # 流量历史保留天数，0 表示永久保留
+  history_retention_days: 30  # 1小时聚合层历史保留天数，0 表示永久保留
+  # 历史数据按三层阶梯降采样归档：raw（IP维度24h / IP×端口维度6h）→ 10分钟聚合（7天）→ 1小时聚合（本保留天数）
+
+# 策略引擎配置
+policy:
+  eval_interval: 10  # 策略评估间隔（秒），0 表示禁用策略引擎
+  risk_window: 86400  # 风险分统计窗口（秒，默认24小时），窗口外的触发事件不再计入风险分
 
 # 防火墙配置
 firewall:

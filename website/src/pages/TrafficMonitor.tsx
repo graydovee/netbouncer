@@ -27,6 +27,7 @@ import {
   ArrowDownward as ArrowDownIcon,
   ArrowUpward as ArrowUpIcon,
   Block as BlockIcon,
+  Dangerous as RiskIcon,
   FilterList as FilterIcon,
   Info as InfoIcon,
   Language as LanguageIcon,
@@ -35,12 +36,13 @@ import {
   Shield as ShieldIcon,
   Speed as SpeedIcon,
   Stop as StopIcon,
+  Timer as TimerIcon,
   VerifiedUser as AllowIcon,
 } from '@mui/icons-material'
 import { trafficApi } from '../api/traffic'
 import { ipApi } from '../api/ip'
 import { errorMessage } from '../api/client'
-import type { TrafficData, TrafficHistoryPoint, TrafficTopEntry } from '../api/types'
+import type { PortTraffic, TrafficData, TrafficHistoryPoint, TrafficTopEntry } from '../api/types'
 import { MessageSnackbar } from '../components/MessageSnackbar'
 import { useMessageSnackbar } from '../hooks/useMessageSnackbar'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
@@ -49,6 +51,7 @@ import { RowsPerPageControl } from '../components/RowsPerPageControl'
 import { StatCard } from '../components/StatCard'
 import { ApplyRuleDialog } from '../components/ApplyRuleDialog'
 import { IpDetailDrawer } from '../components/IpDetailDrawer'
+import { PortDetailDialog } from '../components/PortDetailDialog'
 import { EChart, type EChartsOption } from '../components/charts/EChart'
 import { useUrlParams } from '../hooks/useUrlParams'
 import { formatBytes, formatBytesPerSec, formatNumber, formatTimestamp } from '../utils/format'
@@ -71,10 +74,24 @@ type RangeKey = (typeof RANGES)[number]['key']
 
 /** 行内管控状态徽标 */
 function ruleStatus(row: TrafficData): { label: string; color: 'error' | 'success' | 'warning' | 'default' } {
-  if (row.rule_action === 'ban') return { label: '已封禁', color: 'error' }
+  if (row.rule_action === 'ban') {
+    return row.banned_until ? { label: '临时封禁', color: 'error' } : { label: '已封禁', color: 'error' }
+  }
   if (row.rule_action === 'allow') return { label: '已加白', color: 'success' }
   if (row.is_banned) return { label: '被网段封禁', color: 'warning' }
   return { label: '未管控', color: 'default' }
+}
+
+/** 风险等级徽标 */
+function riskChip(level: TrafficData['risk_level'], score: number) {
+  if (score <= 0 || level === 'none' || !level) return null
+  const map = {
+    low: { label: `低风险 ${score}`, color: 'warning' as const },
+    medium: { label: `中风险 ${score}`, color: 'warning' as const },
+    high: { label: `高风险 ${score}`, color: 'error' as const },
+  }
+  const conf = map[level] ?? map.low
+  return <Chip label={conf.label} size="small" color={conf.color} variant="outlined" icon={<RiskIcon sx={{ fontSize: 14 }} />} />
 }
 
 function TrafficMonitor() {
@@ -103,6 +120,10 @@ function TrafficMonitor() {
   const [historyPoints, setHistoryPoints] = useState<TrafficHistoryPoint[]>([])
   const [topEntries, setTopEntries] = useState<TrafficTopEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  // ---- 端口维度 ----
+  const [portTraffic, setPortTraffic] = useState<PortTraffic[]>([])
+  const [portDetail, setPortDetail] = useState<{ proto: string; port: number } | null>(null)
 
   // ---- 交互 ----
   const [selectedIPs, setSelectedIPs] = useState<Set<string>>(new Set())
@@ -136,12 +157,14 @@ function TrafficMonitor() {
     try {
       const end = Math.floor(Date.now() / 1000)
       const start = end - range.seconds
-      const [points, top] = await Promise.all([
+      const [points, top, ports] = await Promise.all([
         trafficApi.history({ start, end, bucket: range.bucket }),
         trafficApi.historyTop({ start, end, limit: 10 }),
+        trafficApi.ports().catch(() => [] as PortTraffic[]),
       ])
       setHistoryPoints(points)
       setTopEntries(top)
+      setPortTraffic(ports)
     } catch (err) {
       console.error('获取流量历史失败:', err)
     } finally {
@@ -223,6 +246,7 @@ function TrafficMonitor() {
     let up = 0
     let connections = 0
     let banned = 0
+    let risky = 0
     for (const item of trafficData) {
       down += item.bytes_in_per_sec
       up += item.bytes_out_per_sec
@@ -230,8 +254,24 @@ function TrafficMonitor() {
       if (item.is_banned) {
         banned++
       }
+      if ((item.risk_score ?? 0) > 0) {
+        risky++
+      }
     }
-    return { down, up, connections, banned, total: trafficData.length }
+    return { down, up, connections, banned, risky, total: trafficData.length }
+  }, [trafficData])
+
+  // ---- 协议分布（按实时累计流量聚合） ----
+  const protoStats = useMemo(() => {
+    const totals = new Map<string, number>()
+    for (const item of trafficData) {
+      for (const p of item.protocols ?? []) {
+        totals.set(p.proto, (totals.get(p.proto) ?? 0) + p.bytes_in + p.bytes_out)
+      }
+    }
+    return [...totals.entries()]
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
   }, [trafficData])
 
   // ---- 图表配置 ----
@@ -310,6 +350,78 @@ function TrafficMonitor() {
       ],
     }
   }, [topEntries])
+
+  const protoOption = useMemo<EChartsOption>(() => {
+    return {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'item',
+        valueFormatter: (value: unknown) => formatBytes(Number(value)),
+      },
+      legend: { bottom: 0, icon: 'circle', itemWidth: 10, itemHeight: 10 },
+      series: [
+        {
+          name: '协议分布',
+          type: 'pie',
+          radius: ['42%', '68%'],
+          center: ['50%', '42%'],
+          data: protoStats,
+          label: { show: false },
+          itemStyle: { borderRadius: 4, borderWidth: 1 },
+          emphasis: { label: { show: true, formatter: '{b}' } },
+        },
+      ],
+    }
+  }, [protoStats])
+
+  const portOption = useMemo<EChartsOption>(() => {
+    // 按当前速率取前 10 个端口，横向柱状图倒序显示
+    const entries = [...portTraffic].slice(0, 10).reverse()
+    return {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: unknown) => {
+          const list = params as { name?: string; value?: unknown; dataIndex?: number }[]
+          if (!Array.isArray(list) || list.length === 0) return ''
+          const item = list[0]
+          const entry = entries[item.dataIndex ?? -1]
+          if (!entry) return item.name ?? ''
+          const lines = [
+            `<b>${item.name}</b>`,
+            `↓ ${formatBytesPerSec(entry.bytes_in_per_sec)}`,
+            `↑ ${formatBytesPerSec(entry.bytes_out_per_sec)}`,
+            `活跃 IP ${entry.ip_count} · 新连接 ${entry.new_conns}`,
+          ]
+          if (entry.top_clients.length > 0) {
+            lines.push(`客户端: ${entry.top_clients.join(', ')}`)
+          }
+          return lines.join('<br/>')
+        },
+      },
+      grid: { left: 8, right: 24, top: 8, bottom: 8, containLabel: true },
+      xAxis: {
+        type: 'value',
+        axisLabel: { formatter: (v: number) => formatBytesPerSec(v) },
+        splitLine: { lineStyle: { opacity: 0.2 } },
+      },
+      yAxis: {
+        type: 'category',
+        data: entries.map((e) => (e.port === 0 ? `${e.proto}/其他` : `${e.proto}/${e.port}`)),
+        axisLabel: { fontSize: 11 },
+      },
+      series: [
+        {
+          name: '当前速率',
+          type: 'bar',
+          data: entries.map((e) => e.bytes_in_per_sec + e.bytes_out_per_sec),
+          barMaxWidth: 18,
+          itemStyle: { borderRadius: [0, 4, 4, 0], color: '#7e6bf2' },
+        },
+      ],
+    }
+  }, [portTraffic])
 
   // ---- 操作 ----
   const openDetail = useCallback(
@@ -507,6 +619,56 @@ function TrafficMonitor() {
       </Paper>
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Paper sx={{ p: 2, height: '100%' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+              协议分布
+              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                实时累计流量
+              </Typography>
+            </Typography>
+            {protoStats.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>
+                暂无协议数据
+              </Typography>
+            ) : (
+              <EChart option={protoOption} height={240} />
+            )}
+          </Paper>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 8 }}>
+          <Paper sx={{ p: 2, height: '100%' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+              端口排行
+              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                按当前速率 · 点击查看趋势
+              </Typography>
+            </Typography>
+            {portTraffic.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>
+                暂无端口数据
+              </Typography>
+            ) : (
+              <EChart
+                option={portOption}
+                height={240}
+                onClick={(params) => {
+                  const name = (params as { name?: string }).name
+                  if (!name) return
+                  const [proto, portStr] = name.split('/')
+                  const port = portStr === '其他' ? 0 : parseInt(portStr, 10)
+                  if (proto && !Number.isNaN(port)) {
+                    setPortDetail({ proto, port })
+                  }
+                }}
+              />
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid size={{ xs: 12, md: 5 }}>
           <Paper sx={{ p: 2, height: '100%' }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -633,6 +795,7 @@ function TrafficMonitor() {
                     { key: 'bytes_out_per_sec', label: '上行速率', sortable: true, hide: null },
                     { key: 'total', label: '累计收发', sortable: false, hide: 'md' },
                     { key: 'connections', label: '连接', sortable: true, hide: 'md' },
+                    { key: 'risk', label: '风险', sortable: false, hide: 'lg' },
                     { key: 'last_seen', label: '最后活动', sortable: true, hide: 'sm' },
                     { key: 'actions', label: '操作', sortable: false, hide: null },
                   ] as const
@@ -692,7 +855,13 @@ function TrafficMonitor() {
                         <Checkbox checked={selectedIPs.has(row.remote_ip)} onChange={() => toggleSelect(row.remote_ip)} />
                       </TableCell>
                       <TableCell>
-                        <Chip label={status.label} size="small" color={status.color} variant={status.color === 'default' ? 'outlined' : 'filled'} />
+                        {row.rule_action === 'ban' && row.banned_until ? (
+                          <Tooltip title={`临时封禁，${formatTimestamp(row.banned_until)} 自动解封`}>
+                            <Chip icon={<TimerIcon sx={{ fontSize: 14 }} />} label={status.label} size="small" color={status.color} />
+                          </Tooltip>
+                        ) : (
+                          <Chip label={status.label} size="small" color={status.color} variant={status.color === 'default' ? 'outlined' : 'filled'} />
+                        )}
                       </TableCell>
                       <TableCell sx={{ fontFamily: 'monospace' }}>
                         <Box
@@ -712,6 +881,7 @@ function TrafficMonitor() {
                         {formatBytes(row.total_bytes_in + row.total_bytes_out)}
                       </TableCell>
                       <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>{row.connections}</TableCell>
+                      <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{riskChip(row.risk_level, row.risk_score ?? 0)}</TableCell>
                       <TableCell
                         sx={{ color: 'text.secondary', fontSize: '0.8rem', display: { xs: 'none', sm: 'table-cell' } }}
                       >
@@ -807,6 +977,13 @@ function TrafficMonitor() {
           )
           void fetchData(false)
         }}
+      />
+
+      {/* 端口趋势下钻 */}
+      <PortDetailDialog
+        detail={portDetail}
+        live={portTraffic}
+        onClose={() => setPortDetail(null)}
       />
 
       {/* IP 详情抽屉 */}

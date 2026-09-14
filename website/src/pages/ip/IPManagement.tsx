@@ -12,6 +12,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Stack,
   Tab,
   Table,
   TableBody,
@@ -44,6 +45,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { RowsPerPageControl } from '../../components/RowsPerPageControl'
 import { useDebounce } from '../../hooks/useDebounce'
 import { formatTimestamp } from '../../utils/format'
+import { Timer as TimerIcon } from '@mui/icons-material'
 import { actionColor, actionLabel } from '../../utils/actions'
 import { ImportDialog } from './ImportDialog'
 import { ChangeActionDialog, ChangeGroupDialog } from './IpRowDialogs'
@@ -486,11 +488,33 @@ function IPManagement() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Chip
-                        label={actionLabel(ipNet.action)}
-                        size="small"
-                        color={actionColor(ipNet.action)}
-                      />
+                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                        <Chip
+                          label={actionLabel(ipNet.action)}
+                          size="small"
+                          color={actionColor(ipNet.action)}
+                        />
+                        {ipNet.action === 'ban' && ipNet.direction === 'out' && (
+                          <Tooltip title="该封禁仅作用于出站方向">
+                            <Chip label="出站" size="small" variant="outlined" />
+                          </Tooltip>
+                        )}
+                        {ipNet.action === 'ban' && ipNet.direction === 'both' && (
+                          <Tooltip title="该封禁同时作用于入站与出站方向">
+                            <Chip label="双向" size="small" variant="outlined" />
+                          </Tooltip>
+                        )}
+                        {ipNet.expires_at && (
+                          <Tooltip title={`临时封禁，${formatTimestamp(ipNet.expires_at)} 自动解封`}>
+                            <Chip icon={<TimerIcon sx={{ fontSize: 13 }} />} label="临时" size="small" color="warning" variant="outlined" />
+                          </Tooltip>
+                        )}
+                        {ipNet.source?.startsWith('policy:') && (
+                          <Tooltip title="由策略自动创建">
+                            <Chip label="策略" size="small" color="info" variant="outlined" />
+                          </Tooltip>
+                        )}
+                      </Stack>
                     </TableCell>
                     <TableCell
                       sx={{ color: 'text.secondary', fontSize: '0.875rem', display: { xs: 'none', md: 'table-cell' } }}

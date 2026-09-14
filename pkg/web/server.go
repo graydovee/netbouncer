@@ -72,8 +72,19 @@ func NewServer(netService *service.NetService, authHandler AuthHandler) *Server 
 
 func (s *Server) registerAPIRoutes(e *echo.Echo) {
 	e.GET("/api/traffic", s.handleGetTraffic)
+	e.GET("/api/traffic/ports", s.handleGetPortTraffic)
 	e.GET("/api/traffic/history", s.handleTrafficHistory)
 	e.GET("/api/traffic/history/top", s.handleTrafficHistoryTop)
+	e.GET("/api/traffic/history/ports", s.handleTrafficPortHistory)
+	e.GET("/api/traffic/history/ports/top", s.handleTrafficPortHistoryTop)
+	e.GET("/api/traffic/history/protocols", s.handleTrafficProtoHistory)
+
+	e.GET("/api/policy", s.handleListPolicies)
+	e.POST("/api/policy", s.handleCreatePolicy)
+	e.PUT("/api/policy/:id", s.handleUpdatePolicy)
+	e.DELETE("/api/policy/:id", s.handleDeletePolicy)
+	e.PUT("/api/policy/:id/enabled", s.handleSetPolicyEnabled)
+	e.GET("/api/risk/events", s.handleListRiskEvents)
 
 	e.GET("/api/ip", s.handleListIpNets)
 	e.POST("/api/ip", s.handleCreateIpNet)

@@ -25,14 +25,42 @@ func NewIpNetStore(db *gorm.DB) *IpNetStore {
 	return &IpNetStore{db: db}
 }
 
+// IpNetOptions 创建/更新 IP 规则时的可选项
+type IpNetOptions struct {
+	Direction string     // in/out/both，空值视为 in
+	ExpiresAt *time.Time // 非 nil 表示临时封禁
+	Source    string     // 规则来源，空值视为 manual
+}
+
+// Normalize 填充缺省值
+func (o IpNetOptions) Normalize() IpNetOptions {
+	if o.Direction != DirectionIn && o.Direction != DirectionOut && o.Direction != DirectionBoth {
+		o.Direction = DirectionIn
+	}
+	if o.Source == "" {
+		o.Source = "manual"
+	}
+	return o
+}
+
 // Create 创建新的 IP 网络记录
 func (s *IpNetStore) Create(ipnet string, groupID uint, action string) (*IpNet, error) {
+	return s.CreateWithOptions(ipnet, groupID, action, IpNetOptions{})
+}
+
+// CreateWithOptions 创建新的 IP 网络记录（带方向/过期/来源）
+func (s *IpNetStore) CreateWithOptions(ipnet string, groupID uint, action string, opts IpNetOptions) (*IpNet, error) {
+	opts = opts.Normalize()
+	now := time.Now()
 	model := IpNet{
 		IpNet:     ipnet,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: now,
+		UpdatedAt: now,
 		GroupID:   groupID,
 		Action:    action,
+		Direction: opts.Direction,
+		ExpiresAt: opts.ExpiresAt,
+		Source:    opts.Source,
 	}
 
 	err := s.db.Create(&model).Error
@@ -96,6 +124,44 @@ func (s *IpNetStore) FindAll() ([]IpNet, error) {
 	return models, nil
 }
 
+// FindAllActive 获取所有未过期的IP网络记录（用于启动时重放防火墙规则）
+func (s *IpNetStore) FindAllActive() ([]IpNet, error) {
+	var models []IpNet
+	if err := s.db.Where("expires_at IS NULL OR expires_at > ?", time.Now()).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	return models, nil
+}
+
+// FindExpired 查找已过期的临时规则（用于自动解封）
+func (s *IpNetStore) FindExpired(now time.Time) ([]IpNet, error) {
+	var models []IpNet
+	if err := s.db.Where("expires_at IS NOT NULL AND expires_at <= ?", now).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	return models, nil
+}
+
+// UpdateWithOptions 更新记录的动作与可选项（方向/过期/来源），并刷新 UpdatedAt
+func (s *IpNetStore) UpdateWithOptions(id uint, action string, opts IpNetOptions) error {
+	opts = opts.Normalize()
+	return s.db.Model(&IpNet{}).Where("id = ?", id).Updates(map[string]any{
+		"action":     action,
+		"direction":  opts.Direction,
+		"expires_at": opts.ExpiresAt,
+		"source":     opts.Source,
+		"updated_at": time.Now(),
+	}).Error
+}
+
+// UpdateAction 更新IP网络记录的操作
+func (s *IpNetStore) UpdateAction(ipNetID uint, action string) error {
+	return s.db.Model(&IpNet{}).Where("id = ?", ipNetID).Updates(map[string]any{
+		"action":     action,
+		"updated_at": time.Now(),
+	}).Error
+}
+
 // FindByFilter 按条件分页查询IP网络记录，返回记录与总数
 func (s *IpNetStore) FindByFilter(filter IpNetFilter) ([]IpNet, int64, error) {
 	query := s.db.Model(&IpNet{})
@@ -144,11 +210,6 @@ func (s *IpNetStore) FindByGroupID(groupID uint) ([]IpNet, error) {
 		return nil, err
 	}
 	return models, nil
-}
-
-// UpdateAction 更新IP网络记录的操作
-func (s *IpNetStore) UpdateAction(ipNetID uint, action string) error {
-	return s.db.Model(&IpNet{}).Where("id = ?", ipNetID).Update("action", action).Error
 }
 
 // UpdateGroupID 更新IP网络记录的组ID

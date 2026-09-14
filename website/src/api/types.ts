@@ -49,6 +49,81 @@ export interface TrafficData {
   rule_action: IpNetAction | ''
   /** 精确命中规则的 ID，0 表示无精确规则 */
   rule_id: number
+  /** 临时封禁到期时间（RFC3339），空 = 永久封禁或未封禁 */
+  banned_until: string
+  /** 风险分（统计窗口内策略触发累加） */
+  risk_score: number
+  /** 风险等级: none|low|medium|high */
+  risk_level: 'none' | 'low' | 'medium' | 'high'
+  /** 协议维度累计统计 */
+  protocols: ProtoStat[]
+  /** 端口维度累计统计（按流量取前若干条） */
+  ports: PortStat[]
+}
+
+/** 单协议的累计流量（对应 service.ProtoStat） */
+export interface ProtoStat {
+  proto: string
+  bytes_in: number
+  bytes_out: number
+  packets_in: number
+  packets_out: number
+}
+
+/** 单协议+端口的累计流量（对应 service.PortStat） */
+export interface PortStat {
+  proto: string
+  /** 0 表示"其他/未分类" */
+  port: number
+  bytes_in: number
+  bytes_out: number
+  packets_in: number
+  packets_out: number
+  /** 该端口累计新建连接数 */
+  conns: number
+}
+
+/** 实时端口排行条目（对应 service.PortTraffic） */
+export interface PortTraffic {
+  proto: string
+  port: number
+  bytes_in: number
+  bytes_out: number
+  bytes_in_per_sec: number
+  bytes_out_per_sec: number
+  ip_count: number
+  new_conns: number
+  top_clients: string[]
+}
+
+/** 端口维度历史聚合点（对应 store.PortHistoryPoint） */
+export interface PortHistoryPoint {
+  ts: number
+  proto: string
+  port: number
+  bytes_in: number
+  bytes_out: number
+  packets_in: number
+  packets_out: number
+}
+
+/** 协议维度历史聚合点（对应 store.ProtoHistoryPoint） */
+export interface ProtoHistoryPoint {
+  ts: number
+  proto: string
+  bytes_in: number
+  bytes_out: number
+  packets_in: number
+  packets_out: number
+}
+
+/** 端口维度历史 Top 榜条目（对应 store.PortTopEntry） */
+export interface PortTopEntry {
+  proto: string
+  port: number
+  bytes_in: number
+  bytes_out: number
+  bytes_sum: number
 }
 
 /** 流量历史聚合点（对应 store.HistoryPoint） */
@@ -88,6 +163,12 @@ export interface IpNet {
   updated_at: string
   group: IpGroup | null
   action: IpNetAction
+  /** ban 生效方向: in/out/both */
+  direction: 'in' | 'out' | 'both'
+  /** 临时封禁到期时间（RFC3339），空 = 永久 */
+  expires_at: string
+  /** 规则来源: manual / policy:<id> */
+  source: string
 }
 
 /** IP规则分页列表（对应 service.IpNetListResult） */
@@ -130,4 +211,58 @@ export interface ImportIpNetRequest {
 export interface GroupPayload {
   name: string
   description: string
+}
+
+/** 策略（对应 service.Policy） */
+export interface Policy {
+  id: number
+  name: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+  /** 匹配条件 */
+  direction: 'in' | 'out' | 'both'
+  protocol: 'any' | 'tcp' | 'udp'
+  /** 0 = 任意端口 */
+  port: number
+  /** 触发条件（0 = 不启用） */
+  rate_kbps: number
+  total_mb: number
+  conn_rate: number
+  distinct_ports: number
+  window_sec: number
+  /** 动作: rate_limit|ban|mark */
+  action: 'rate_limit' | 'ban' | 'mark'
+  limit_kbps: number
+  burst_kbps: number
+  ban_sec: number
+  risk_score: number
+  /** 风险升级 */
+  risk_ban_threshold: number
+  risk_ban_sec: number
+  cooldown_sec: number
+}
+
+/** 策略创建/更新请求 */
+export type PolicyPayload = Omit<Policy, 'id' | 'created_at' | 'updated_at'>
+
+/** 风险事件（对应 service.RiskEvent） */
+export interface RiskEvent {
+  id: number
+  remote_ip: string
+  /** unix 秒 */
+  ts: number
+  policy_id: number
+  policy_name: string
+  /** 触发时的观测值描述 */
+  trigger_value: string
+  /** mark|ban|auto_ban */
+  action: 'mark' | 'ban' | 'auto_ban'
+  score: number
+}
+
+/** 风险事件分页列表（对应 service.RiskEventListResult） */
+export interface RiskEventListResult {
+  items: RiskEvent[]
+  total: number
 }
