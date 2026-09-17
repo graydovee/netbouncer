@@ -61,6 +61,14 @@ import type { IpNetAction } from '../api/types'
 const MIN_REFRESH_SECONDS = 5
 const MAX_REFRESH_SECONDS = 3600
 
+/** 列表行：TrafficData + 预计算的合计字段（供排序） */
+type TrafficRow = TrafficData & { total: number }
+
+const withTotal = (row: TrafficData): TrafficRow => ({
+  ...row,
+  total: row.total_bytes_in + row.total_bytes_out,
+})
+
 // 历史时间范围（秒 → 合理的聚合桶宽）
 const RANGES = [
   { key: '1h', label: '1小时', seconds: 3600, bucket: 60 },
@@ -96,7 +104,7 @@ function riskChip(level: TrafficData['risk_level'], score: number) {
 
 function TrafficMonitor() {
   // ---- 实时数据 ----
-  const [trafficData, setTrafficData] = useState<TrafficData[]>([])
+  const [trafficData, setTrafficData] = useState<TrafficRow[]>([])
   const [loading, setLoading] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -105,7 +113,7 @@ function TrafficMonitor() {
   const [refreshInterval, setRefreshInterval] = useState(30)
 
   const { getParam, updateParams } = useUrlParams()
-  const sortKey = getParam('sort', 'bytes_out_per_sec') as keyof TrafficData
+  const sortKey = getParam('sort', 'bytes_out_per_sec') as keyof TrafficRow
   const sortAsc = getParam('order', 'desc') === 'asc'
 
   const [page, setPage] = useState(0)
@@ -140,7 +148,7 @@ function TrafficMonitor() {
     setError(null)
     try {
       const data = await trafficApi.get()
-      setTrafficData(data)
+      setTrafficData(data.map(withTotal))
       setLastUpdate(new Date())
     } catch (err) {
       setError(errorMessage(err, '获取流量数据失败'))
@@ -793,9 +801,9 @@ function TrafficMonitor() {
                     { key: 'local_ip', label: '本地IP', sortable: true, hide: 'lg' },
                     { key: 'bytes_in_per_sec', label: '下行速率', sortable: true, hide: null },
                     { key: 'bytes_out_per_sec', label: '上行速率', sortable: true, hide: null },
-                    { key: 'total', label: '累计收发', sortable: false, hide: 'md' },
+                    { key: 'total', label: '累计收发', sortable: true, hide: 'md' },
                     { key: 'connections', label: '连接', sortable: true, hide: 'md' },
-                    { key: 'risk', label: '风险', sortable: false, hide: 'lg' },
+                    { key: 'risk_score', label: '风险', sortable: true, hide: 'lg' },
                     { key: 'last_seen', label: '最后活动', sortable: true, hide: 'sm' },
                     { key: 'actions', label: '操作', sortable: false, hide: null },
                   ] as const
@@ -878,7 +886,7 @@ function TrafficMonitor() {
                       <TableCell sx={{ fontFamily: 'monospace' }}>{formatBytesPerSec(row.bytes_in_per_sec)}</TableCell>
                       <TableCell sx={{ fontFamily: 'monospace' }}>{formatBytesPerSec(row.bytes_out_per_sec)}</TableCell>
                       <TableCell sx={{ fontFamily: 'monospace', display: { xs: 'none', md: 'table-cell' } }}>
-                        {formatBytes(row.total_bytes_in + row.total_bytes_out)}
+                        {formatBytes(row.total)}
                       </TableCell>
                       <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>{row.connections}</TableCell>
                       <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{riskChip(row.risk_level, row.risk_score ?? 0)}</TableCell>
