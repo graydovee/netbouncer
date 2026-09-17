@@ -42,7 +42,13 @@ func clampHistoryBounds(start, end, bucket int64) (int64, int64, int64, bool) {
 	return start, end, bucket, true
 }
 
-// splitPlan 分层查询计划：把一个时间区间按 raw 保留边界切分为聚合层部分与 raw 部分
+// 分层路由常量
+const (
+	// shortRangeLimit 短范围直接查 raw：数据量小且保留采样粒度
+	shortRangeLimit = 2 * 3600
+)
+
+// splitPlan 分层查询计划：长范围查聚合层，聚合层完备点之后的最新数据查 raw
 type splitPlan struct {
 	effBucket int64 // 实际使用的桶宽（涉及聚合层时不小于聚合层粒度）
 
@@ -57,11 +63,10 @@ type splitPlan struct {
 }
 
 // planRange 生成查询计划。
-// rawCutoff 为 raw 层最早保留时间；聚合层负责 [start, boundary+effBucket)，
-// raw 负责 [boundary+effBucket, end)，其中 boundary 为跨越 rawCutoff 的聚合桶起点，
-// 保证两段无缝且不重叠（跨越桶由聚合层完整提供，避免 raw 已被清理造成缺口或重复计数）
-func planRange(start, end, bucket, rawCutoff int64) splitPlan {
-	if start >= rawCutoff {
+// 聚合层由滚动任务保证覆盖到最后一个已完结的 10 分钟桶（boundary），
+// 其后的最新数据量很小（≤ ~20 分钟），直接查 raw 补齐；两段无缝且不重叠。
+func planRange(start, end, bucket int64) splitPlan {
+	if end-start <= shortRangeLimit {
 		return splitPlan{effBucket: bucket, useRaw: true, rawFrom: start, rawTo: end}
 	}
 
@@ -71,27 +76,35 @@ func planRange(start, end, bucket, rawCutoff int64) splitPlan {
 		effBucket = layer
 	}
 
-	if end <= rawCutoff {
+	now := time.Now().Unix()
+	boundary := now - now%store.RollupBucket10m
+
+	if start >= boundary {
+		return splitPlan{effBucket: bucket, useRaw: true, rawFrom: start, rawTo: end}
+	}
+	if end <= boundary {
 		return splitPlan{
 			effBucket: effBucket, useRollup: true,
 			rollupLayer: layer, rollupFrom: start, rollupTo: end,
 		}
 	}
 
-	boundary := rawCutoff - rawCutoff%effBucket
-	splitAt := boundary + effBucket
-	plan := splitPlan{effBucket: effBucket, rollupLayer: layer}
-	if start < splitAt {
-		plan.useRollup = true
-		plan.rollupFrom = start
-		plan.rollupTo = splitAt
+	return splitPlan{
+		effBucket:   effBucket,
+		rollupLayer: layer,
+		useRollup:   true,
+		rollupFrom:  start,
+		rollupTo:    boundary,
+		useRaw:      true,
+		rawFrom:     boundary,
+		rawTo:       end,
 	}
-	if end > splitAt {
-		plan.useRaw = true
-		plan.rawFrom = splitAt
-		plan.rawTo = end
-	}
-	return plan
+}
+
+// needRawFallback 聚合层查询结果为空时回退 raw 层兜底（冷启动或聚合任务异常期间）。
+// raw 仅保留 24h，超窗区间自然为空，回退代价以区间内实际行数为界。
+func needRawFallback[T any](plan splitPlan, got []T) bool {
+	return plan.useRollup && len(got) == 0
 }
 
 // pickRollupLayer 选择聚合层：桶宽不小于 1 小时或跨度超出 10 分钟层保留窗口时用 1 小时层
@@ -140,13 +153,19 @@ func (s *NetService) TrafficHistory(start, end, bucket int64, ip string) ([]stor
 		return nil, Invalidf("时间区间无效: start=%d end=%d", start, end)
 	}
 
-	plan := planRange(start, end, bucket, rawIPCutoff())
+	plan := planRange(start, end, bucket)
 
 	var parts [][]store.HistoryPoint
 	if plan.useRollup {
 		points, err := s.store.TrafficRollupStore.QueryIpHistory(plan.rollupLayer, plan.rollupFrom, plan.rollupTo, plan.effBucket, ip)
 		if err != nil {
 			return nil, Internalf("查询流量历史(聚合层)失败: %v", err)
+		}
+		if needRawFallback(plan, points) {
+			points, err = s.store.TrafficSampleStore.QueryHistory(plan.rollupFrom, plan.rollupTo, plan.effBucket, ip)
+			if err != nil {
+				return nil, Internalf("查询流量历史失败: %v", err)
+			}
 		}
 		parts = append(parts, points)
 	}
@@ -173,13 +192,19 @@ func (s *NetService) TrafficHistoryTop(start, end int64, limit int) ([]store.Top
 		limit = maxHistoryLimit
 	}
 
-	plan := planRange(start, end, minHistoryBucket, rawIPCutoff())
+	plan := planRange(start, end, minHistoryBucket)
 
 	var parts [][]store.TopEntry
 	if plan.useRollup {
 		entries, err := s.store.TrafficRollupStore.QueryIpTop(plan.rollupLayer, plan.rollupFrom, plan.rollupTo, limit)
 		if err != nil {
 			return nil, Internalf("查询流量排行(聚合层)失败: %v", err)
+		}
+		if needRawFallback(plan, entries) {
+			entries, err = s.store.TrafficSampleStore.QueryTop(plan.rollupFrom, plan.rollupTo, limit)
+			if err != nil {
+				return nil, Internalf("查询流量排行失败: %v", err)
+			}
 		}
 		parts = append(parts, entries)
 	}
@@ -222,16 +247,6 @@ func mergeTopEntries(parts [][]store.TopEntry, limit int) []store.TopEntry {
 	return merged
 }
 
-// rawIPCutoff raw 层（IP 维度）的最早保留时间
-func rawIPCutoff() int64 {
-	return time.Now().Add(-rawIPRetention).Unix()
-}
-
-// rawPortCutoff raw 层（端口维度）的最早保留时间
-func rawPortCutoff() int64 {
-	return time.Now().Add(-rawPortRetention).Unix()
-}
-
 // --- 端口/协议维度历史 ---
 
 // PortHistoryParams 端口维度历史查询参数
@@ -250,13 +265,19 @@ func (s *NetService) TrafficPortHistory(p PortHistoryParams) ([]store.PortHistor
 	}
 	filter := store.PortHistoryFilter{RemoteIP: p.IP, Proto: p.Proto, Port: p.Port}
 
-	plan := planRange(start, end, bucket, rawPortCutoff())
+	plan := planRange(start, end, bucket)
 
 	var parts [][]store.PortHistoryPoint
 	if plan.useRollup {
 		points, err := s.store.TrafficRollupStore.QueryPortHistory(plan.rollupLayer, plan.rollupFrom, plan.rollupTo, plan.effBucket, filter)
 		if err != nil {
 			return nil, Internalf("查询端口历史(聚合层)失败: %v", err)
+		}
+		if needRawFallback(plan, points) {
+			points, err = s.store.TrafficPortStore.QueryHistory(plan.rollupFrom, plan.rollupTo, plan.effBucket, filter)
+			if err != nil {
+				return nil, Internalf("查询端口历史失败: %v", err)
+			}
 		}
 		parts = append(parts, points)
 	}
@@ -321,13 +342,19 @@ func (s *NetService) TrafficPortHistoryTop(p PortHistoryParams, limit int) ([]st
 	}
 	filter := store.PortHistoryFilter{RemoteIP: p.IP, Proto: p.Proto, Port: p.Port}
 
-	plan := planRange(start, end, minHistoryBucket, rawPortCutoff())
+	plan := planRange(start, end, minHistoryBucket)
 
 	var parts [][]store.PortTopEntry
 	if plan.useRollup {
 		entries, err := s.store.TrafficRollupStore.QueryPortTop(plan.rollupLayer, plan.rollupFrom, plan.rollupTo, limit, filter)
 		if err != nil {
 			return nil, Internalf("查询端口排行(聚合层)失败: %v", err)
+		}
+		if needRawFallback(plan, entries) {
+			entries, err = s.store.TrafficPortStore.QueryTopPorts(plan.rollupFrom, plan.rollupTo, limit, filter)
+			if err != nil {
+				return nil, Internalf("查询端口排行失败: %v", err)
+			}
 		}
 		parts = append(parts, entries)
 	}
@@ -378,13 +405,20 @@ func (s *NetService) TrafficProtoHistory(p PortHistoryParams) ([]store.ProtoHist
 		return nil, Invalidf("时间区间无效: start=%d end=%d", p.Start, p.End)
 	}
 
-	plan := planRange(start, end, bucket, rawPortCutoff())
+	plan := planRange(start, end, bucket)
 
 	var merged []store.ProtoHistoryPoint
 	if plan.useRollup {
 		points, err := s.store.TrafficRollupStore.QueryProtoHistory(plan.rollupLayer, plan.rollupFrom, plan.rollupTo, plan.effBucket, p.IP)
 		if err != nil {
 			return nil, Internalf("查询协议历史(聚合层)失败: %v", err)
+		}
+		if needRawFallback(plan, points) {
+			// 聚合层该区间无数据（冷启动/聚合任务异常），回退查 raw
+			points, err = s.store.TrafficPortStore.QueryProtoHistory(plan.rollupFrom, plan.rollupTo, plan.effBucket, p.IP)
+			if err != nil {
+				return nil, Internalf("查询协议历史失败: %v", err)
+			}
 		}
 		merged = append(merged, points...)
 	}

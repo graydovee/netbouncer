@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -141,7 +141,15 @@ function TrafficMonitor() {
   const { snackbar, showMessage, hideMessage } = useMessageSnackbar()
   const { showConfirm, confirmState, handleConfirm, handleCancel } = useConfirmDialog()
 
+  // 在途请求防重入：上一轮未完成时跳过本轮触发，避免慢查询时请求堆积
+  const trafficInFlight = useRef(false)
+  const historyInFlight = useRef(false)
+
   const fetchData = useCallback(async (showLoading: boolean) => {
+    if (trafficInFlight.current) {
+      return
+    }
+    trafficInFlight.current = true
     if (showLoading) {
       setLoading(true)
     }
@@ -153,29 +161,42 @@ function TrafficMonitor() {
     } catch (err) {
       setError(errorMessage(err, '获取流量数据失败'))
     } finally {
+      trafficInFlight.current = false
       setLoading(false)
       setInitialLoading(false)
+    }
+  }, [])
+
+  // 实时端口排行独立刷新：走引擎内存缓存（毫秒级），不与历史慢查询绑定
+  const fetchPorts = useCallback(async () => {
+    try {
+      setPortTraffic(await trafficApi.ports())
+    } catch (err) {
+      console.error('获取端口排行失败:', err)
     }
   }, [])
 
   const range = RANGES.find((r) => r.key === rangeKey) ?? RANGES[1]
 
   const fetchHistory = useCallback(async () => {
+    if (historyInFlight.current) {
+      return
+    }
+    historyInFlight.current = true
     setHistoryLoading(true)
     try {
       const end = Math.floor(Date.now() / 1000)
       const start = end - range.seconds
-      const [points, top, ports] = await Promise.all([
+      const [points, top] = await Promise.all([
         trafficApi.history({ start, end, bucket: range.bucket }),
         trafficApi.historyTop({ start, end, limit: 10 }),
-        trafficApi.ports().catch(() => [] as PortTraffic[]),
       ])
       setHistoryPoints(points)
       setTopEntries(top)
-      setPortTraffic(ports)
     } catch (err) {
       console.error('获取流量历史失败:', err)
     } finally {
+      historyInFlight.current = false
       setHistoryLoading(false)
     }
   }, [range])
@@ -183,6 +204,10 @@ function TrafficMonitor() {
   useEffect(() => {
     void fetchData(true)
   }, [fetchData])
+
+  useEffect(() => {
+    void fetchPorts()
+  }, [fetchPorts])
 
   useEffect(() => {
     void fetchHistory()
@@ -195,10 +220,11 @@ function TrafficMonitor() {
     }
     const timer = window.setInterval(() => {
       void fetchData(false)
+      void fetchPorts()
       void fetchHistory()
     }, Math.max(refreshInterval, 15) * 1000)
     return () => window.clearInterval(timer)
-  }, [autoRefresh, refreshInterval, fetchData, fetchHistory])
+  }, [autoRefresh, refreshInterval, fetchData, fetchPorts, fetchHistory])
 
   const handleRefreshIntervalChange = (raw: string) => {
     const parsed = parseInt(raw, 10) || MIN_REFRESH_SECONDS
@@ -545,7 +571,7 @@ function TrafficMonitor() {
             </Typography>
           )}
           <Tooltip title="手动刷新">
-            <IconButton onClick={() => { void fetchData(false); void fetchHistory() }} disabled={loading} size="small">
+            <IconButton onClick={() => { void fetchData(false); void fetchPorts(); void fetchHistory() }} disabled={loading} size="small">
               <RefreshIcon />
             </IconButton>
           </Tooltip>

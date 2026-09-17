@@ -45,7 +45,7 @@ func (r *Rollup) Start(ctx context.Context) {
 	}
 
 	go r.loop(ctx, 10*time.Minute, r.run10m)
-	go r.loop(ctx, time.Hour, r.runHourly)
+	go r.loopDelayed(ctx, time.Hour, 45*time.Second, r.runHourly)
 	slog.Info("流量降采样任务已启动",
 		"raw_ip_retention", rawIPRetention.String(),
 		"raw_port_retention", rawPortRetention.String(),
@@ -54,6 +54,18 @@ func (r *Rollup) Start(ctx context.Context) {
 }
 
 func (r *Rollup) loop(ctx context.Context, every time.Duration, job func()) {
+	r.loopDelayed(ctx, every, 0, job)
+}
+
+// loopDelayed 周期任务；initialDelay 用于错开多个任务同时启动时的写锁竞争
+func (r *Rollup) loopDelayed(ctx context.Context, every, initialDelay time.Duration, job func()) {
+	if initialDelay > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(initialDelay):
+		}
+	}
 	// 立即执行一次，保证重启后尽快补齐缺口
 	job()
 	ticker := time.NewTicker(every)
