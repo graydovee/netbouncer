@@ -7,9 +7,14 @@ monitor:
   window: 60  # 监控时间窗口（秒）
   timeout: 86400  # 连接超时时间（秒，24小时）
   capture_filter: ""  # BPF捕获过滤器，留空使用默认 "tcp or udp or icmp or icmp6"
-  history_interval: 60  # 流量历史采样间隔（秒），0 表示禁用历史持久化
-  history_retention_days: 30  # 1小时聚合层历史保留天数，0 表示永久保留
-  # 历史数据按三层阶梯降采样归档：raw（IP维度24h / IP×端口维度6h）→ 10分钟聚合（7天）→ 1小时聚合（本保留天数）
+  history_interval: 60  # 固定60秒；0禁用历史持久化
+  history_retention_days: 30  # 固定30天，容量不足时自动缩短
+  # 独立分片：1分钟（6h）→10分钟（7天）→1小时（30天）
+
+history:
+  directory: ""  # 默认在控制库旁创建 traffic-history-v1
+  budget_bytes: 2147483648  # 包含WAL的总历史预算，2GiB
+  reserve_bytes: 2147483648  # 系统盘预留2GiB
 
 # 策略引擎配置
 policy:
@@ -50,7 +55,7 @@ database:
   password: ""            # 数据库密码（sqlite不需要）
   database: "netbouncer.db"  # 数据库名称或文件路径
   dsn: ""                 # 数据库连接字符串（可选，优先级高于其他配置）
-  log_level: "info"       # SQL日志级别: "silent", "error", "warn", "info"
+  log_level: "warn"       # SQL日志级别: "silent", "error", "warn", "info"
 
 # 初始规则配置
 rules:

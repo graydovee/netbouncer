@@ -66,6 +66,11 @@ COPY . .
 # 复制前端构建产物，嵌入二进制实现单文件部署
 COPY --from=frontend-builder /app/frontend/dist ./pkg/web/dist
 
+# Run the complete test suite with the native Linux toolchain before publishing either architecture.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go test -race ./...
+
 # 按目标架构编译：同架构用原生 gcc，异架构用上面装好的交叉工具链
 RUN set -eux; \
     HOSTARCH="$(dpkg --print-architecture)"; \

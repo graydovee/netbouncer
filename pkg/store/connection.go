@@ -65,22 +65,21 @@ func (l *SlogLogger) Error(ctx context.Context, msg string, data ...any) {
 // Trace 记录SQL跟踪日志
 func (l *SlogLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
 	elapsed := time.Since(begin)
-	sql, rows := fc()
-
-	attrs := []any{
-		"elapsed", elapsed,
-		"rows", rows,
-	}
-
+	// Never log literal SQL or batch payloads, even on disk-full errors.
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return
+		}
 		if l.level <= slog.LevelError {
-			slog.Error("SQL执行错误", append(attrs, "error", err, "sql", sql)...)
+			slog.Error("SQL执行失败", "elapsed", elapsed, "error", err)
 		}
-	} else {
-		if l.level <= slog.LevelInfo {
-			slog.Info("SQL执行", append(attrs, "sql", sql)...)
-		}
+		return
 	}
+	if elapsed > 200*time.Millisecond && l.level <= slog.LevelWarn {
+		_, rows := fc()
+		slog.Warn("慢查询", "elapsed", elapsed, "rows", rows)
+	}
+
 }
 
 // appendSQLitePragmas 为 DSN 追加 WAL/busy_timeout/synchronous 参数（幂等）
@@ -139,6 +138,8 @@ func NewDatabase(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(4)
 	if err := sqlDB.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}

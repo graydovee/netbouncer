@@ -1,15 +1,12 @@
 # 只产出镜像、不部署到集群：构建双架构镜像并合并 manifest 推到 Harbor。
 #
-# 触发：推送到主分支 / 打 tag 都会构建并推镜像
-#   分支推送 → 镜像 tag 用短 SHA（sha-xxxxxxx）
-#   tag 推送 → 镜像 tag 用 tag 名（vX.Y.Z）
+# 仅打 tag 触发正式发版；分支提交不重复构建。
 #
 # 前置：四个 Actions secrets 已建且作用域覆盖本仓库（见 SKILL.md 3.3）
 name: build
 
 on:
   push:
-    branches: [main, master]
     tags: ["v*"]
 
 env:

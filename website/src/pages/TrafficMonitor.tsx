@@ -42,7 +42,7 @@ import {
 import { trafficApi } from '../api/traffic'
 import { ipApi } from '../api/ip'
 import { errorMessage } from '../api/client'
-import type { PortTraffic, TrafficData, TrafficHistoryPoint, TrafficTopEntry } from '../api/types'
+import type { PortTraffic, TrafficData, TrafficHistoryPoint, TrafficTopEntry, TrafficOverview, HistoryMeta, StorageStatus } from '../api/types'
 import { MessageSnackbar } from '../components/MessageSnackbar'
 import { useMessageSnackbar } from '../hooks/useMessageSnackbar'
 import { ConfirmDialog, useConfirmDialog } from '../components/ConfirmDialog'
@@ -108,9 +108,18 @@ function TrafficMonitor() {
   const [loading, setLoading] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [totalRows, setTotalRows] = useState(0)
+  const [overview, setOverview] = useState<TrafficOverview>({ down: 0, up: 0, total: 0, connections: 0, banned: 0, risky: 0, protocols: [], snapshot_id: 0 })
+  const [overviewError, setOverviewError] = useState<string | null>(null)
+  const [portsError, setPortsError] = useState<string | null>(null)
+  const [trendError, setTrendError] = useState<string | null>(null)
+  const [topError, setTopError] = useState<string | null>(null)
+  const [historyMeta, setHistoryMeta] = useState<HistoryMeta | null>(null)
+  const [storage, setStorage] = useState<StorageStatus | null>(null)
+  const [storageError, setStorageError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [refreshInterval, setRefreshInterval] = useState(30)
+  const [refreshInterval, setRefreshInterval] = useState(15)
 
   const { getParam, updateParams } = useUrlParams()
   const sortKey = getParam('sort', 'bytes_out_per_sec') as keyof TrafficRow
@@ -122,6 +131,11 @@ function TrafficMonitor() {
   const [filterRemoteIP, setFilterRemoteIP] = useState('')
   const [filterLocalIP, setFilterLocalIP] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+  const [filters, setFilters] = useState({ remote: '', local: '' })
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFilters({ remote: filterRemoteIP, local: filterLocalIP }), 250)
+    return () => window.clearTimeout(timer)
+  }, [filterRemoteIP, filterLocalIP])
 
   // ---- 历史图表 ----
   const [rangeKey, setRangeKey] = useState<RangeKey>('24h')
@@ -141,90 +155,75 @@ function TrafficMonitor() {
   const { snackbar, showMessage, hideMessage } = useMessageSnackbar()
   const { showConfirm, confirmState, handleConfirm, handleCancel } = useConfirmDialog()
 
-  // 在途请求防重入：上一轮未完成时跳过本轮触发，避免慢查询时请求堆积
-  const trafficInFlight = useRef(false)
-  const historyInFlight = useRef(false)
+  const trafficRequest = useRef<AbortController | null>(null)
+  const historyRequest = useRef<AbortController | null>(null)
+  const overviewRequest = useRef<AbortController | null>(null)
+  const portsRequest = useRef<AbortController | null>(null)
 
   const fetchData = useCallback(async (showLoading: boolean) => {
-    if (trafficInFlight.current) {
-      return
-    }
-    trafficInFlight.current = true
-    if (showLoading) {
-      setLoading(true)
-    }
-    setError(null)
+    trafficRequest.current?.abort()
+    const request = new AbortController()
+    trafficRequest.current = request
+    if (showLoading) setLoading(true)
     try {
-      const data = await trafficApi.get()
-      setTrafficData(data.map(withTotal))
-      setLastUpdate(new Date())
-    } catch (err) {
-      setError(errorMessage(err, '获取流量数据失败'))
-    } finally {
-      trafficInFlight.current = false
-      setLoading(false)
-      setInitialLoading(false)
-    }
+      const data = await trafficApi.get({ page, page_size: rowsPerPage, sort: sortKey, order: sortAsc ? 'asc' : 'desc', remote_ip: filters.remote, local_ip: filters.local }, request.signal)
+      if (request.signal.aborted) return
+      setTrafficData(data.items.map(withTotal)); setTotalRows(data.total); setError(null); setLastUpdate(new Date(data.snapshot_id))
+      if (page > 0 && page * rowsPerPage >= data.total) setPage(Math.max(0, Math.ceil(data.total / rowsPerPage) - 1))
+    } catch (err) { if (!request.signal.aborted) setError(errorMessage(err, '获取流量数据失败')) }
+    finally { if (!request.signal.aborted) { setLoading(false); setInitialLoading(false) } }
+  }, [page, rowsPerPage, sortKey, sortAsc, filters])
+  const fetchOverview = useCallback(async () => {
+    overviewRequest.current?.abort()
+    const request = new AbortController(); overviewRequest.current = request
+    try { const data = await trafficApi.overview(request.signal); if (!request.signal.aborted) { setOverview(data); setOverviewError(null) } }
+    catch (err) { if (!request.signal.aborted) setOverviewError(errorMessage(err, '概览刷新失败')) }
   }, [])
-
-  // 实时端口排行独立刷新：走引擎内存缓存（毫秒级），不与历史慢查询绑定
   const fetchPorts = useCallback(async () => {
-    try {
-      setPortTraffic(await trafficApi.ports())
-    } catch (err) {
-      console.error('获取端口排行失败:', err)
-    }
+    portsRequest.current?.abort()
+    const request = new AbortController(); portsRequest.current = request
+    try { const data = await trafficApi.ports(request.signal); if (!request.signal.aborted) { setPortTraffic(data); setPortsError(null) } }
+    catch (err) { if (!request.signal.aborted) setPortsError(errorMessage(err, '端口排行刷新失败')) }
   }, [])
-
   const range = RANGES.find((r) => r.key === rangeKey) ?? RANGES[1]
-
   const fetchHistory = useCallback(async () => {
-    if (historyInFlight.current) {
-      return
-    }
-    historyInFlight.current = true
+    historyRequest.current?.abort()
+    const request = new AbortController(); historyRequest.current = request
     setHistoryLoading(true)
-    try {
-      const end = Math.floor(Date.now() / 1000)
-      const start = end - range.seconds
-      const [points, top] = await Promise.all([
-        trafficApi.history({ start, end, bucket: range.bucket }),
-        trafficApi.historyTop({ start, end, limit: 10 }),
-      ])
-      setHistoryPoints(points)
-      setTopEntries(top)
-    } catch (err) {
-      console.error('获取流量历史失败:', err)
-    } finally {
-      historyInFlight.current = false
-      setHistoryLoading(false)
-    }
+    const end = Math.floor(Date.now() / 1000); const start = end - range.seconds
+    await Promise.allSettled([
+      trafficApi.history({ start, end, bucket: range.bucket }, request.signal).then((result) => {
+        if (!request.signal.aborted) { setHistoryPoints(result.items); setHistoryMeta(result.meta); setTrendError(null) }
+      }).catch((err: unknown) => { if (!request.signal.aborted) setTrendError(errorMessage(err, '历史趋势刷新失败')) }),
+      trafficApi.historyTop({ start, end, limit: 10 }, request.signal).then((result) => {
+        if (!request.signal.aborted) { setTopEntries(result.items); setTopError(null) }
+      }).catch((err: unknown) => { if (!request.signal.aborted) setTopError(errorMessage(err, '历史排行刷新失败')) }),
+    ])
+    if (!request.signal.aborted) setHistoryLoading(false)
   }, [range])
-
+  useEffect(() => { void fetchData(true); return () => trafficRequest.current?.abort() }, [fetchData])
+  useEffect(() => { void fetchOverview(); return () => overviewRequest.current?.abort() }, [fetchOverview])
+  useEffect(() => { void fetchPorts(); return () => portsRequest.current?.abort() }, [fetchPorts])
+  useEffect(() => { void fetchHistory(); return () => historyRequest.current?.abort() }, [fetchHistory])
   useEffect(() => {
-    void fetchData(true)
-  }, [fetchData])
-
-  useEffect(() => {
-    void fetchPorts()
-  }, [fetchPorts])
-
-  useEffect(() => {
-    void fetchHistory()
-  }, [fetchHistory])
-
-  // 自动刷新：实时 + 历史一起刷新
-  useEffect(() => {
-    if (!autoRefresh) {
-      return
+    const request = new AbortController()
+    const refresh = async () => {
+      try { const data = await trafficApi.storage(request.signal); if (!request.signal.aborted) { setStorage(data); setStorageError(null) } }
+      catch (err) { if (!request.signal.aborted) setStorageError(errorMessage(err, '历史存储状态不可用')) }
     }
-    const timer = window.setInterval(() => {
-      void fetchData(false)
-      void fetchPorts()
-      void fetchHistory()
-    }, Math.max(refreshInterval, 15) * 1000)
+    void refresh(); const timer = window.setInterval(() => void refresh(), 60000)
+    return () => { request.abort(); window.clearInterval(timer) }
+  }, [])
+  useEffect(() => {
+    if (!autoRefresh) return
+    const timer = window.setInterval(() => { void fetchData(false); void fetchOverview(); void fetchPorts() }, Math.max(refreshInterval, 15) * 1000)
     return () => window.clearInterval(timer)
-  }, [autoRefresh, refreshInterval, fetchData, fetchPorts, fetchHistory])
+  }, [autoRefresh, refreshInterval, fetchData, fetchOverview, fetchPorts])
+  useEffect(() => {
+    if (!autoRefresh) return
+    const timer = window.setInterval(() => void fetchHistory(), 60000)
+    return () => window.clearInterval(timer)
+  }, [autoRefresh, fetchHistory])
 
   const handleRefreshIntervalChange = (raw: string) => {
     const parsed = parseInt(raw, 10) || MIN_REFRESH_SECONDS
@@ -233,80 +232,17 @@ function TrafficMonitor() {
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
+      setPage(0)
       updateParams({ order: sortAsc ? 'desc' : 'asc' })
     } else {
+      setPage(0)
       updateParams({ sort: key, order: 'desc' })
     }
   }
 
-  // ---- 过滤/排序/分页 ----
-  const filteredData = useMemo(() => {
-    let filtered = trafficData
-    if (filterRemoteIP) {
-      const needle = filterRemoteIP.toLowerCase()
-      filtered = filtered.filter((item) => item.remote_ip.toLowerCase().includes(needle))
-    }
-    if (filterLocalIP) {
-      const needle = filterLocalIP.toLowerCase()
-      filtered = filtered.filter((item) => item.local_ip.toLowerCase().includes(needle))
-    }
-    return filtered
-  }, [trafficData, filterRemoteIP, filterLocalIP])
-
-  const sortedData = useMemo(() => {
-    const sorted = [...filteredData]
-    sorted.sort((a, b) => {
-      const v1 = a[sortKey]
-      const v2 = b[sortKey]
-      let compared: number
-      if (typeof v1 === 'string' || typeof v2 === 'string') {
-        compared = String(v1).localeCompare(String(v2))
-      } else {
-        compared = (v1 as number) - (v2 as number)
-      }
-      return sortAsc ? compared : -compared
-    })
-    return sorted
-  }, [filteredData, sortKey, sortAsc])
-
-  const currentPageData = useMemo(
-    () => sortedData.slice(page * rowsPerPage, (page + 1) * rowsPerPage),
-    [sortedData, page, rowsPerPage],
-  )
-
-  // ---- 概览统计 ----
-  const overview = useMemo(() => {
-    let down = 0
-    let up = 0
-    let connections = 0
-    let banned = 0
-    let risky = 0
-    for (const item of trafficData) {
-      down += item.bytes_in_per_sec
-      up += item.bytes_out_per_sec
-      connections += item.connections
-      if (item.is_banned) {
-        banned++
-      }
-      if ((item.risk_score ?? 0) > 0) {
-        risky++
-      }
-    }
-    return { down, up, connections, banned, risky, total: trafficData.length }
-  }, [trafficData])
-
-  // ---- 协议分布（按实时累计流量聚合） ----
-  const protoStats = useMemo(() => {
-    const totals = new Map<string, number>()
-    for (const item of trafficData) {
-      for (const p of item.protocols ?? []) {
-        totals.set(p.proto, (totals.get(p.proto) ?? 0) + p.bytes_in + p.bytes_out)
-      }
-    }
-    return [...totals.entries()]
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-  }, [trafficData])
+  // Filtering, ordering and pagination happen on the server. Overview covers all IPs.
+  const currentPageData = trafficData
+  const protoStats = useMemo(() => overview.protocols.map((p) => ({ name: p.proto, value: p.bytes_in + p.bytes_out })).sort((a, b) => b.value - a.value), [overview.protocols])
 
   // ---- 图表配置 ----
   const trendOption = useMemo<EChartsOption>(() => {
@@ -571,7 +507,7 @@ function TrafficMonitor() {
             </Typography>
           )}
           <Tooltip title="手动刷新">
-            <IconButton onClick={() => { void fetchData(false); void fetchPorts(); void fetchHistory() }} disabled={loading} size="small">
+            <IconButton onClick={() => { void fetchData(false); void fetchOverview(); void fetchPorts(); void fetchHistory() }} disabled={loading} size="small">
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -603,6 +539,15 @@ function TrafficMonitor() {
       )}
 
       {/* 概览卡片 */}
+      {[overviewError, portsError, trendError, topError, storageError].filter(Boolean).map((message) => <Alert key={message} severity="warning" sx={{ mb: 1 }}>{message}；保留上次成功的数据。</Alert>)}
+      {storage && <Alert severity={storage.paused || storage.last_error ? 'warning' : 'info'} sx={{ mb: 2 }}>
+        历史存储 {formatBytes(storage.bytes)} / {formatBytes(storage.budget_bytes)} · 系统盘可用 {formatBytes(storage.free_bytes)}
+        {storage.available_start > 0 ? ` · 可查询起点 ${new Date(storage.available_start * 1000).toLocaleString()}` : ' · 等待首个分钟采样'}
+        {storage.paused ? ' · 历史采样已暂停，实时监控继续运行' : ''}
+        {storage.last_error ? ` · ${storage.last_error}` : ''}
+        {historyMeta && ` · 当前曲线桶宽 ${historyMeta.bucket} 秒`}
+        {historyMeta && historyMeta.gaps.length > 0 ? ' · 所选范围存在无数据或采样缺口' : ''}
+      </Alert>}
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <StatCard icon={<SpeedIcon />} label="下行速率" value={`${formatBytesPerSec(overview.down)}`} color="success" />
@@ -611,7 +556,7 @@ function TrafficMonitor() {
           <StatCard icon={<SpeedIcon sx={{ transform: 'rotate(180deg)' }} />} label="上行速率" value={`${formatBytesPerSec(overview.up)}`} color="info" />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
-          <StatCard icon={<LanguageIcon />} label="活跃 IP" value={formatNumber(overview.total)} sub={`过滤后 ${filteredData.length}`} color="primary" />
+          <StatCard icon={<LanguageIcon />} label="活跃 IP" value={formatNumber(overview.total)} sub={`过滤后 ${totalRows}`} color="primary" />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <StatCard icon={<ShieldIcon />} label="封禁中" value={formatNumber(overview.banned)} color="error" />
@@ -981,7 +926,7 @@ function TrafficMonitor() {
         </TableContainer>
         <TablePagination
           component="div"
-          count={filteredData.length}
+          count={totalRows}
           page={page}
           onPageChange={(_, newPage) => setPage(newPage)}
           rowsPerPage={rowsPerPage}

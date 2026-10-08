@@ -266,3 +266,20 @@ export interface RiskEventListResult {
   items: RiskEvent[]
   total: number
 }
+
+export interface TrafficPage { items: TrafficData[]; total: number; snapshot_id: number }
+export interface TrafficOverview {
+ down: number; up: number; connections: number; banned: number; risky: number; total: number
+ protocols: ProtoStat[]; snapshot_id: number
+}
+export interface HistoryGap { start: number; end: number; reason: string }
+export interface HistoryMeta {
+ start: number; end: number; bucket: number; freshness: number; available_start: number; gaps: HistoryGap[]
+}
+export interface HistoryResult<T> { items: T[]; meta: HistoryMeta }
+export interface StorageStatus {
+ schema_version: number; bytes: number; budget_bytes: number; free_bytes: number; reserve_bytes: number
+ available_start: number; freshness: number; paused: boolean; last_error?: string; write_failures: number
+ gaps: HistoryGap[]
+ shards: { name: string; resolution: number; start: number; end: number; bytes: number; watermark: number }[]
+}

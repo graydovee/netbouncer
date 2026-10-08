@@ -18,6 +18,9 @@ func slogLogger() echo.MiddlewareFunc {
 			err := next(c)
 
 			duration := time.Since(start)
+			if c.Get("benchmark") == true {
+				return err
+			}
 
 			req := c.Request()
 			res := c.Response()

@@ -43,6 +43,7 @@ func SaveConfig(cfg *Config, configPath string) error {
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
+		History: HistoryConfig{BudgetBytes: 2 << 30, ReserveBytes: 2 << 30},
 		Monitor: MonitorConfig{
 			Interface:            "",
 			ExcludeSubnets:       "",
@@ -65,6 +66,7 @@ func DefaultConfig() *Config {
 		},
 		Database: DatabaseConfig{
 			Driver:   "sqlite",
+			LogLevel: "warn",
 			Host:     "",
 			Port:     0,
 			Username: "",

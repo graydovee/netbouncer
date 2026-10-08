@@ -2,7 +2,6 @@ package service
 
 import (
 	"testing"
-	"time"
 
 	"github.com/graydovee/netbouncer/pkg/core"
 	"github.com/graydovee/netbouncer/pkg/store"
@@ -143,79 +142,6 @@ func TestCheckTrigger(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPlanRange(t *testing.T) {
-	now := time.Now().Unix()
-	boundary := now - now%store.RollupBucket10m // 聚合层完备点（与实现同口径）
-
-	t.Run("短范围(≤2h)直接查 raw", func(t *testing.T) {
-		plan := planRange(now-7200, now, 60)
-		if !plan.useRaw || plan.useRollup {
-			t.Fatalf("应只查 raw: %+v", plan)
-		}
-		if plan.effBucket != 60 {
-			t.Fatalf("桶宽不应调整: %d", plan.effBucket)
-		}
-	})
-
-	t.Run("24h 走 10 分钟层 + raw 尾巴", func(t *testing.T) {
-		start := now - 86400
-		plan := planRange(start, now, 900)
-		if !plan.useRollup || !plan.useRaw {
-			t.Fatalf("24h 应跨层: %+v", plan)
-		}
-		if plan.rollupLayer != store.RollupBucket10m {
-			t.Fatalf("24h 应用 10 分钟层: %d", plan.rollupLayer)
-		}
-		if plan.rollupTo != plan.rawFrom {
-			t.Fatalf("两段应无缝: rollupTo=%d rawFrom=%d", plan.rollupTo, plan.rawFrom)
-		}
-		if plan.rollupTo != boundary {
-			t.Fatalf("切分点应为聚合完备点 %d, got %d", boundary, plan.rollupTo)
-		}
-		if plan.rawFrom < boundary || plan.rawTo != now {
-			t.Fatalf("raw 尾巴错误: [%d, %d)", plan.rawFrom, plan.rawTo)
-		}
-	})
-
-	t.Run("范围完全在聚合完备点之前", func(t *testing.T) {
-		start := boundary - 3*86400
-		end := boundary - 2*86400
-		plan := planRange(start, end, 300)
-		if plan.useRaw || !plan.useRollup {
-			t.Fatalf("应只查聚合层: %+v", plan)
-		}
-		if plan.rollupLayer != store.RollupBucket10m {
-			t.Fatalf("5天范围应用 10 分钟层: %d", plan.rollupLayer)
-		}
-	})
-
-	t.Run("范围完全在最近 10 分钟内", func(t *testing.T) {
-		plan := planRange(boundary+60, now, 60)
-		if !plan.useRaw || plan.useRollup {
-			t.Fatalf("应只查 raw: %+v", plan)
-		}
-	})
-
-	t.Run("大跨度使用 1 小时层", func(t *testing.T) {
-		start := boundary - 20*86400
-		end := boundary - 86400
-		plan := planRange(start, end, 300)
-		if plan.rollupLayer != store.RollupBucket1h {
-			t.Fatalf("20天范围应用 1 小时层: %d", plan.rollupLayer)
-		}
-		if plan.useRaw {
-			t.Fatalf("end 早于完备点不应查 raw: %+v", plan)
-		}
-	})
-
-	t.Run("长范围聚合桶宽不小于层粒度", func(t *testing.T) {
-		plan := planRange(boundary-3*86400, boundary-7200-1, 300)
-		if plan.effBucket < plan.rollupLayer {
-			t.Fatalf("effBucket=%d 不应小于层粒度=%d", plan.effBucket, plan.rollupLayer)
-		}
-	})
 }
 
 func TestValidatePolicy(t *testing.T) {

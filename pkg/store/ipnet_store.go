@@ -1,6 +1,7 @@
 package store
 
 import (
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -17,12 +18,22 @@ type IpNetFilter struct {
 
 // IpNetStore 处理 IpNet 表的数据库操作
 type IpNetStore struct {
-	db *gorm.DB
+	db       *gorm.DB
+	revision atomic.Uint64
 }
 
 // NewIpNetStore 创建新的 IpNetStore 实例
 func NewIpNetStore(db *gorm.DB) *IpNetStore {
-	return &IpNetStore{db: db}
+	s := &IpNetStore{db: db}
+	changed := func(tx *gorm.DB) {
+		if tx.Error == nil && tx.Statement.Table == "banned_ip_net" {
+			s.revision.Add(1)
+		}
+	}
+	_ = db.Callback().Create().After("gorm:commit_or_rollback_transaction").Register("ipnet:revision", changed)
+	_ = db.Callback().Update().After("gorm:commit_or_rollback_transaction").Register("ipnet:revision", changed)
+	_ = db.Callback().Delete().After("gorm:commit_or_rollback_transaction").Register("ipnet:revision", changed)
+	return s
 }
 
 // IpNetOptions 创建/更新 IP 规则时的可选项
@@ -261,6 +272,7 @@ func (s *IpNetStore) BatchCreate(ipnets []string, groupID uint, action string) (
 		return nil, err
 	}
 
+	s.revision.Add(1) // outer batch transaction has now committed
 	return allModels, nil
 }
 
@@ -291,3 +303,5 @@ func (s *IpNetStore) FindByIpNets(ipnets []string) ([]IpNet, error) {
 
 	return allModels, nil
 }
+
+func (s *IpNetStore) Revision() uint64 { return s.revision.Load() }

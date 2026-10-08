@@ -27,7 +27,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options,
       headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
     })
-  } catch {
+  } catch (err) {
+    if (options.signal?.aborted) throw err
     throw new ApiError(0, '网络请求失败，请检查后端服务是否可用')
   }
 
@@ -51,8 +52,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return result.data
 }
 
-export function get<T>(path: string): Promise<T> {
-  return request<T>(path)
+export function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, { signal })
 }
 
 export function post<T>(path: string, body?: unknown): Promise<T> {

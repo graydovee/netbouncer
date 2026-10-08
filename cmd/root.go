@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/graydovee/netbouncer/pkg/history"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -52,7 +54,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&cfg.Monitor.Window, "monitor-window", "w", cfg.Monitor.Window, "监控时间窗口（秒）")
 	rootCmd.Flags().IntVarP(&cfg.Monitor.Timeout, "monitor-timeout", "t", cfg.Monitor.Timeout, "连接超时时间（秒）")
 	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryInterval, "monitor-history-interval", cfg.Monitor.HistoryInterval, "流量历史采样间隔（秒），0 表示禁用")
-	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryRetentionDays, "monitor-history-retention-days", cfg.Monitor.HistoryRetentionDays, "1小时聚合层历史保留天数，0 表示永久保留")
+	rootCmd.Flags().IntVar(&cfg.Monitor.HistoryRetentionDays, "monitor-history-retention-days", cfg.Monitor.HistoryRetentionDays, "历史保留天数（固定30）")
 	rootCmd.Flags().StringVar(&cfg.Monitor.CaptureFilter, "monitor-capture-filter", cfg.Monitor.CaptureFilter, "BPF捕获过滤器（留空使用默认 tcp or udp or icmp or icmp6）")
 
 	// 策略引擎配置
@@ -208,6 +210,8 @@ func run(cmd *cobra.Command) error {
 		return fmt.Errorf("创建数据库连接失败: %w", err)
 	}
 
+	defer st.Close()
+
 	// 创建防火墙
 	fw, err := core.NewFirewallFromConfig(&cfg.Firewall)
 	if err != nil {
@@ -248,26 +252,54 @@ func run(cmd *cobra.Command) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
-	// 流量历史采样器（history_interval=0 时禁用）
+	// History never shares the control database or resurrects the old raw tables.
 	if cfg.Monitor.HistoryInterval > 0 {
-		sampler := service.NewSampler(
-			mon,
-			st.TrafficSampleStore,
-			st.TrafficPortStore,
-			time.Duration(cfg.Monitor.HistoryInterval)*time.Second,
-		)
-		sampler.Start(ctx)
+		directory := cfg.History.Directory
+		if directory == "" {
+			directory = filepath.Join(filepath.Dir(cfg.Database.Database), "traffic-history-v1")
+		}
+		h, err := history.Open(history.Options{Dir: directory, BudgetBytes: cfg.History.BudgetBytes, ReserveBytes: cfg.History.ReserveBytes})
+		if err != nil {
+			return fmt.Errorf("打开历史存储失败: %w", err)
+		}
+		svc.SetHistory(h)
+		collector := service.NewHistoryCollector(mon, h)
+		collector.Start(ctx)
+		defer func() {
+			stop()
+			wait, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = collector.Wait(wait)
+			_ = h.Close()
+		}()
 	}
-
-	// 降采样滚动任务（raw → 10分钟层 → 1小时层归档与保留期清理）
-	retention := time.Duration(cfg.Monitor.HistoryRetentionDays) * 24 * time.Hour
-	rollup := service.NewRollup(st, retention, retention)
-	rollup.Start(ctx)
+	// Risk events have independent control-data retention, even when history is disabled.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := st.RiskEventStore.Cleanup(time.Now().Add(-30 * 24 * time.Hour).Unix()); err != nil {
+					slog.Warn("风险事件清理失败", "error", err)
+				}
+			}
+		}
+	}()
 
 	// 策略引擎（eval_interval=0 时禁用）
 	engine := service.NewPolicyEngine(mon, fw, svc, st, &cfg.Policy)
 	svc.SetPolicyEngine(engine)
 	engine.Start(ctx)
+	svc.StartSnapshots(ctx)
+	defer func() {
+		stop()
+		wait, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = svc.WaitSnapshots(wait)
+	}()
 
 	server := web.NewServer(svc, authHandler)
 

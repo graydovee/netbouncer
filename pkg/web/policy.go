@@ -230,46 +230,15 @@ func parsePortHistoryParams(c echo.Context) (service.PortHistoryParams, bool, er
 
 // handleTrafficPortHistory 端口维度历史趋势
 func (s *Server) handleTrafficPortHistory(c echo.Context) error {
-	params, ok, err := parsePortHistoryParams(c)
-	if !ok {
-		return err
-	}
-
-	points, err := s.netService.TrafficPortHistory(params)
-	if err != nil {
-		return respondServiceError(c, err)
-	}
-	return respondSuccess(c, points)
+	return s.handleHistoryQuery(c, "ports")
 }
 
 // handleTrafficPortHistoryTop 端口维度流量排行
 func (s *Server) handleTrafficPortHistoryTop(c echo.Context) error {
-	params, ok, err := parsePortHistoryParams(c)
-	if !ok {
-		return err
-	}
-	limit, ok, err := queryInt(c, "limit", 10)
-	if !ok {
-		return err
-	}
-
-	entries, err := s.netService.TrafficPortHistoryTop(params, limit)
-	if err != nil {
-		return respondServiceError(c, err)
-	}
-	return respondSuccess(c, entries)
+	return s.handleHistoryQuery(c, "port_top")
 }
 
 // handleTrafficProtoHistory 协议维度历史趋势
 func (s *Server) handleTrafficProtoHistory(c echo.Context) error {
-	params, ok, err := parsePortHistoryParams(c)
-	if !ok {
-		return err
-	}
-
-	points, err := s.netService.TrafficProtoHistory(params)
-	if err != nil {
-		return respondServiceError(c, err)
-	}
-	return respondSuccess(c, points)
+	return s.handleHistoryQuery(c, "protocols")
 }

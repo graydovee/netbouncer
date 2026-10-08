@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -39,6 +40,7 @@ import type {
   RiskEvent,
   TrafficData,
   TrafficHistoryPoint,
+ HistoryMeta,
 } from '../api/types'
 import { EChart } from './charts/EChart'
 import { ConfirmDialog, useConfirmDialog } from './ConfirmDialog'
@@ -64,7 +66,11 @@ const RANGES = [
 type RangeKey = (typeof RANGES)[number]['key']
 
 /** 单 IP 详情抽屉：历史趋势 + 黑白名单规则管理 */
-export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDetailDrawerProps) => {
+export const IpDetailDrawer = ({ ip, live: initialLive, onClose, onMessage, onChanged }: IpDetailDrawerProps) => {
+  const [live, setLive] = useState<TrafficData | null>(initialLive)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyMeta, setHistoryMeta] = useState<HistoryMeta | null>(null)
+  const historyRequest = useRef<AbortController | null>(null)
   const [rangeKey, setRangeKey] = useState<RangeKey>('24h')
   const [points, setPoints] = useState<TrafficHistoryPoint[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -78,50 +84,47 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
   const range = RANGES.find((r) => r.key === rangeKey) ?? RANGES[1]
 
   const fetchHistory = useCallback(async () => {
-    if (!ip) {
-      return
-    }
+    historyRequest.current?.abort()
+    if (!ip) return
+    const request = new AbortController(); historyRequest.current = request
     setHistoryLoading(true)
     try {
-      const end = Date.now() / 1000
-      const data = await trafficApi.history({
-        start: Math.floor(end - range.seconds),
-        end: Math.floor(end),
-        bucket: range.bucket,
-        ip,
-      })
-      setPoints(data)
-    } catch (err) {
-      console.error('获取历史失败:', err)
-    } finally {
-      setHistoryLoading(false)
-    }
+      const end = Math.floor(Date.now() / 1000)
+      const data = await trafficApi.history({ start: end - range.seconds, end, bucket: range.bucket, ip }, request.signal)
+      if (!request.signal.aborted) { setPoints(data.items); setHistoryMeta(data.meta); setHistoryError(null) }
+    } catch (err) { if (!request.signal.aborted) setHistoryError(errorMessage(err, '获取历史失败')) }
+    finally { if (!request.signal.aborted) setHistoryLoading(false) }
   }, [ip, range])
+  useEffect(() => { setPoints([]); setHistoryMeta(null); setHistoryError(null) }, [ip])
+  useEffect(() => { void fetchHistory(); return () => historyRequest.current?.abort() }, [fetchHistory])
+  useEffect(() => {
+    setLive(initialLive)
+    if (!ip) return
+    const request = new AbortController()
+    const refresh = () => { void trafficApi.detail(ip, request.signal).then((data) => { if (!request.signal.aborted) setLive(data) }).catch((err: unknown) => { if (!request.signal.aborted) setHistoryError(errorMessage(err, '实时详情不可用')) }) }
+    refresh(); const timer = window.setInterval(refresh, 15000)
+    return () => { request.abort(); window.clearInterval(timer) }
+  }, [ip, initialLive])
 
   useEffect(() => {
     if (!ip) {
       return
     }
-    setPoints([])
-    void fetchHistory()
-  }, [ip, fetchHistory])
-
-  useEffect(() => {
-    if (!ip) {
-      return
-    }
+    let cancelled = false
     setRiskEvents([])
     groupApi
       .list()
       .then((list) => {
+        if (cancelled) return
         setGroups(list)
         setGroupId((list.find((g) => g.is_default) ?? list[0])?.id ?? '')
       })
-      .catch(() => setGroups([]))
+      .catch(() => { if (!cancelled) setGroups([]) })
     riskApi
       .list({ ip, page_size: 20 })
-      .then((result) => setRiskEvents(result.items))
-      .catch(() => setRiskEvents([]))
+      .then((result) => { if (!cancelled) setRiskEvents(result.items) })
+      .catch(() => { if (!cancelled) setRiskEvents([]) })
+    return () => { cancelled = true }
   }, [ip])
 
   const chartOption = useMemo(() => {
@@ -244,6 +247,8 @@ export const IpDetailDrawer = ({ ip, live, onClose, onMessage, onChanged }: IpDe
 
   return (
     <Drawer anchor="right" open={Boolean(ip)} onClose={onClose}>
+      {historyError && <Alert severity="warning">{historyError}</Alert>}
+      {historyMeta && <Alert severity="info">桶宽 {historyMeta.bucket} 秒{historyMeta.gaps.length > 0 ? ' · 所选范围存在采样缺口' : ''}</Alert>}
       <Box sx={{ width: { xs: '100vw', sm: 480 }, p: 3 }} role="presentation">
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
           <Typography variant="h6" sx={{ fontFamily: 'monospace' }}>

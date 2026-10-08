@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
   Box,
   CircularProgress,
   Dialog,
@@ -13,8 +14,9 @@ import {
   Typography,
 } from '@mui/material'
 import { Close as CloseIcon } from '@mui/icons-material'
+import { errorMessage } from '../api/client'
 import { trafficApi } from '../api/traffic'
-import type { PortHistoryPoint, PortTraffic } from '../api/types'
+import type { PortHistoryPoint, PortTraffic, HistoryMeta } from '../api/types'
 import { EChart, type EChartsOption } from './charts/EChart'
 import { formatBytes, formatBytesPerSec, formatNumber } from '../utils/format'
 
@@ -36,6 +38,8 @@ type RangeKey = (typeof RANGES)[number]['key']
 
 /** 端口趋势下钻对话框：该端口的进出流量历史 + 当前活跃客户端 */
 export const PortDetailDialog = ({ detail, live, onClose }: PortDetailDialogProps) => {
+  const [error, setError] = useState<string | null>(null)
+  const [meta, setMeta] = useState<HistoryMeta | null>(null)
   const [rangeKey, setRangeKey] = useState<RangeKey>('6h')
   const [points, setPoints] = useState<PortHistoryPoint[]>([])
   const [loading, setLoading] = useState(false)
@@ -46,7 +50,7 @@ export const PortDetailDialog = ({ detail, live, onClose }: PortDetailDialogProp
     if (!detail) {
       return
     }
-    setPoints([])
+    const request = new AbortController()
     let cancelled = false
     const fetchTrend = async () => {
       setLoading(true)
@@ -58,12 +62,14 @@ export const PortDetailDialog = ({ detail, live, onClose }: PortDetailDialogProp
           bucket: range.bucket,
           proto: detail.proto,
           port: detail.port,
-        })
+        }, request.signal)
         if (!cancelled) {
-          setPoints(data)
+          setPoints(data.items)
+          setMeta(data.meta)
+          setError(null)
         }
       } catch (err) {
-        console.error('获取端口历史失败:', err)
+        if (!cancelled) setError(errorMessage(err, '获取端口历史失败'))
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -73,6 +79,7 @@ export const PortDetailDialog = ({ detail, live, onClose }: PortDetailDialogProp
     void fetchTrend()
     return () => {
       cancelled = true
+      request.abort()
     }
   }, [detail, range])
 
@@ -149,6 +156,8 @@ export const PortDetailDialog = ({ detail, live, onClose }: PortDetailDialogProp
         </IconButton>
       </DialogTitle>
       <DialogContent dividers>
+        {error && <Alert severity="warning">{error}</Alert>}
+        {meta && <Alert severity="info">桶宽 {meta.bucket} 秒{meta.gaps.length > 0 ? ' · 所选范围存在采样缺口' : ''}</Alert>}
         {liveEntry && (
           <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
             <Stat label="下行速率" value={`${formatBytesPerSec(liveEntry.bytes_in_per_sec)}`} />

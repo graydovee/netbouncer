@@ -8,25 +8,25 @@ import (
 
 // TrafficData 实时流量数据（按远程 IP）
 type TrafficData struct {
-	RemoteIP        string      `json:"remote_ip"`         // 远程IP
-	LocalIP         string      `json:"local_ip"`          // 本地IP
-	TotalBytesIn    uint64      `json:"total_bytes_in"`    // 总接收字节数
-	TotalBytesOut   uint64      `json:"total_bytes_out"`   // 总发送字节数
-	TotalPacketsIn  uint64      `json:"total_packets_in"`  // 总接收包数
-	TotalPacketsOut uint64      `json:"total_packets_out"` // 总发送包数
-	BytesInPerSec   float64     `json:"bytes_in_per_sec"`  // 每秒接收字节数
-	BytesOutPerSec  float64     `json:"bytes_out_per_sec"` // 每秒发送字节数
-	Connections     int         `json:"connections"`       // 连接数
-	FirstSeen       string      `json:"first_seen"`        // 首次发现时间
-	LastSeen        string      `json:"last_seen"`         // 最后活动时间
-	IsBanned        bool        `json:"is_banned"`         // 是否被ban（含被网段规则覆盖的情况）
-	RuleAction      string      `json:"rule_action"`       // 精确命中该IP的规则动作：""/ban/allow（网段覆盖时为空）
-	RuleID          uint        `json:"rule_id"`           // 精确命中规则的ID，0 表示无精确规则
-	BannedUntil     string      `json:"banned_until"`      // 临时封禁到期时间（RFC3339），空 = 永久封禁或未封禁
-	RiskScore       int         `json:"risk_score"`        // 风险分（统计窗口内策略触发累加）
-	RiskLevel       string      `json:"risk_level"`        // 风险等级: none|low|medium|high
-	Protocols       []ProtoStat `json:"protocols"`         // 协议维度累计统计
-	Ports           []PortStat  `json:"ports"`             // 端口维度累计统计（按流量取前若干条）
+	RemoteIP        string      `json:"remote_ip"`           // 远程IP
+	LocalIP         string      `json:"local_ip"`            // 本地IP
+	TotalBytesIn    uint64      `json:"total_bytes_in"`      // 总接收字节数
+	TotalBytesOut   uint64      `json:"total_bytes_out"`     // 总发送字节数
+	TotalPacketsIn  uint64      `json:"total_packets_in"`    // 总接收包数
+	TotalPacketsOut uint64      `json:"total_packets_out"`   // 总发送包数
+	BytesInPerSec   float64     `json:"bytes_in_per_sec"`    // 每秒接收字节数
+	BytesOutPerSec  float64     `json:"bytes_out_per_sec"`   // 每秒发送字节数
+	Connections     int         `json:"connections"`         // 连接数
+	FirstSeen       string      `json:"first_seen"`          // 首次发现时间
+	LastSeen        string      `json:"last_seen"`           // 最后活动时间
+	IsBanned        bool        `json:"is_banned"`           // 是否被ban（含被网段规则覆盖的情况）
+	RuleAction      string      `json:"rule_action"`         // 精确命中该IP的规则动作：""/ban/allow（网段覆盖时为空）
+	RuleID          uint        `json:"rule_id"`             // 精确命中规则的ID，0 表示无精确规则
+	BannedUntil     string      `json:"banned_until"`        // 临时封禁到期时间（RFC3339），空 = 永久封禁或未封禁
+	RiskScore       int         `json:"risk_score"`          // 风险分（统计窗口内策略触发累加）
+	RiskLevel       string      `json:"risk_level"`          // 风险等级: none|low|medium|high
+	Protocols       []ProtoStat `json:"protocols,omitempty"` // 协议维度累计统计
+	Ports           []PortStat  `json:"ports,omitempty"`     // 端口维度累计统计（按流量取前若干条）
 }
 
 // ProtoStat 单协议的累计流量

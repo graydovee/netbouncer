@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
-	"sort"
 	"sync"
 	"time"
 
@@ -16,19 +14,17 @@ import (
 
 // 策略引擎边界常量
 const (
-	minEvalInterval   = 5  // 评估间隔下限（秒）
-	minPolicyWindow   = 10 // 策略统计窗口下限（秒）
-	maxPolicyWindow   = 86400
-	minBanSec         = 10
-	maxBanSec         = 30 * 24 * 3600
-	topClientsPerPort = 5   // 实时端口排行展示的客户端数
-	maxPortSummaries  = 200 // 内存中保留的实时端口聚合条数上限
+	minEvalInterval = 5  // 评估间隔下限（秒）
+	minPolicyWindow = 10 // 策略统计窗口下限（秒）
+	maxPolicyWindow = 86400
+	minBanSec       = 10
+	maxBanSec       = 30 * 24 * 3600
 )
 
 // PolicyEngine 策略引擎：
 //   - 评估循环（默认 10s）：按策略匹配条件聚合每 IP 的流量/连接/端口指标，超阈值执行
 //     mark/ban 动作并记录风险事件；风险分达到阈值的 IP 自动升级临时封禁
-//   - 限速动作由内核 hashlimit 常驻规则实现，引擎只负责装卸与实时端口聚合的刷新
+//   - 限速动作由内核 hashlimit 常驻规则实现，引擎只负责装卸
 //   - 过期解封循环：每 30s 解除到期的临时封禁
 type PolicyEngine struct {
 	monitor      Monitor
@@ -42,9 +38,6 @@ type PolicyEngine struct {
 	states      map[uint]map[string]*ipPolicyState // policyID -> ip -> 窗口状态
 	riskScores  map[string]int                     // ip -> 窗口内风险分
 	lastRebuild time.Time
-	portStats   []PortTraffic            // 实时端口聚合缓存（供 API 读取）
-	portPrev    map[string]portPrevEntry // proto:port -> 上次快照
-	portPrevTs  time.Time
 }
 
 // ipPolicyState 单策略×单 IP 的评估状态
@@ -110,12 +103,6 @@ type windowBucket struct {
 	ports map[uint32]struct{} // 本 tick 内有新增流量的端口键（扫描检测用）
 }
 
-// portPrevEntry 实时端口聚合的上次快照
-type portPrevEntry struct {
-	counters matchCounters
-	ips      int
-}
-
 func NewPolicyEngine(monitor Monitor, firewall Firewall, net *NetService, st *store.Store, cfg *config.PolicyConfig) *PolicyEngine {
 	interval := time.Duration(cfg.EvalInterval) * time.Second
 	if interval < time.Duration(minEvalInterval)*time.Second {
@@ -134,7 +121,6 @@ func NewPolicyEngine(monitor Monitor, firewall Firewall, net *NetService, st *st
 		riskWindow:   riskWindow,
 		states:       make(map[uint]map[string]*ipPolicyState),
 		riskScores:   make(map[string]int),
-		portPrev:     make(map[string]portPrevEntry),
 	}
 }
 
@@ -146,18 +132,6 @@ func (e *PolicyEngine) RiskScore(ip string) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.riskScores[ip]
-}
-
-// PortTrafficSnapshot 返回实时端口聚合（评估循环刷新；引擎禁用时返回空）
-func (e *PolicyEngine) PortTrafficSnapshot() []PortTraffic {
-	if e == nil {
-		return nil
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]PortTraffic, len(e.portStats))
-	copy(out, e.portStats)
-	return out
 }
 
 // Start 启动评估循环与过期解封循环
@@ -276,16 +250,11 @@ func (e *PolicyEngine) evaluate() error {
 	stats := e.monitor.GetStats()
 
 	// 白名单 IP 跳过所有动作；已封禁 IP 不重复触发封禁
-	allowEntities, err := e.store.IpNetStore.FindByAction(store.ActionAllow)
+	rules, err := e.net.rules()
 	if err != nil {
-		return fmt.Errorf("查询白名单失败: %w", err)
+		return err
 	}
-	allowNets := convertToIpNet(allowEntities...)
-	bannedEntities, err := e.store.IpNetStore.FindByAction(store.ActionBan)
-	if err != nil {
-		return fmt.Errorf("查询封禁列表失败: %w", err)
-	}
-	bannedNets := convertToIpNet(bannedEntities...)
+	newlyBanned := map[string]bool{}
 
 	now := time.Now()
 	nextStates := make(map[uint]map[string]*ipPolicyState, len(evalPolicies))
@@ -303,7 +272,7 @@ func (e *PolicyEngine) evaluate() error {
 
 		policyStates := make(map[string]*ipPolicyState, len(stats))
 		for ip, st := range stats {
-			if isContainIpNet(allowNets, ip) {
+			if rules.Allowed(ip) {
 				continue
 			}
 
@@ -382,7 +351,7 @@ func (e *PolicyEngine) evaluate() error {
 			state.lastTrigger = now
 			action := policy.Action
 			if action == store.PolicyActionBan {
-				if IsBanned(bannedNets, allowNets, ip) {
+				if rules.Banned(ip) || newlyBanned[ip] {
 					// 已封禁则只记事件不再重复下发
 					action = store.PolicyActionMark
 				} else if err := e.net.BanTemporary(ip, policy.Direction, now.Add(time.Duration(policy.BanSec)*time.Second), policySource(policy.ID)); err != nil {
@@ -390,7 +359,7 @@ func (e *PolicyEngine) evaluate() error {
 					continue
 				} else {
 					// 封禁列表变更，后续 IP 判断使用最新状态
-					bannedNets = appendIfMissing(bannedNets, ip)
+					newlyBanned[ip] = true
 				}
 			}
 
@@ -429,11 +398,10 @@ func (e *PolicyEngine) evaluate() error {
 
 	// 风险升级检查
 	if len(escalations) > 0 {
-		e.checkEscalation(escalations, bannedNets, allowNets, now)
+		e.checkEscalation(escalations, now)
 	}
 
 	// 刷新实时端口聚合
-	e.refreshPortStats(stats, now)
 	return nil
 }
 
@@ -617,7 +585,13 @@ func checkTrigger(policy *store.Policy, agg windowAgg, windowSeconds float64) (b
 }
 
 // checkEscalation 风险升级：风险分达到任一策略阈值时自动临时封禁并清零重计
-func (e *PolicyEngine) checkEscalation(policies []*store.Policy, bannedNets, allowNets []*net.IPNet, now time.Time) {
+func (e *PolicyEngine) checkEscalation(policies []*store.Policy, now time.Time) {
+	rules, err := e.net.rules()
+	if err != nil {
+		slog.Error("风险升级规则读取失败", "error", err)
+		return
+	}
+	newlyBanned := map[string]bool{}
 	type escalation struct {
 		policy *store.Policy
 		ip     string
@@ -632,7 +606,7 @@ func (e *PolicyEngine) checkEscalation(policies []*store.Policy, bannedNets, all
 			continue
 		}
 		for ip, score := range e.riskScores {
-			if score >= policy.RiskBanThreshold && !IsBanned(bannedNets, allowNets, ip) {
+			if score >= policy.RiskBanThreshold && !(rules.Banned(ip) || newlyBanned[ip]) {
 				pending = append(pending, escalation{policy: policy, ip: ip, score: score})
 			}
 		}
@@ -645,11 +619,14 @@ func (e *PolicyEngine) checkEscalation(policies []*store.Policy, bannedNets, all
 
 	var events []store.RiskEvent
 	for _, esc := range pending {
+		if newlyBanned[esc.ip] || rules.Allowed(esc.ip) {
+			continue
+		}
 		if err := e.net.BanTemporary(esc.ip, esc.policy.Direction, now.Add(time.Duration(esc.policy.RiskBanSec)*time.Second), policySource(esc.policy.ID)); err != nil {
 			slog.Error("风险升级自动封禁失败", "policy", esc.policy.Name, "ip", esc.ip, "error", err)
 			continue
 		}
-		bannedNets = appendIfMissing(bannedNets, esc.ip)
+		newlyBanned[esc.ip] = true
 		events = append(events, store.RiskEvent{
 			RemoteIP:     esc.ip,
 			Ts:           now.Unix(),
@@ -674,97 +651,6 @@ func (e *PolicyEngine) checkEscalation(policies []*store.Policy, bannedNets, all
 }
 
 // refreshPortStats 基于相邻两次快照的差值刷新实时端口聚合缓存
-func (e *PolicyEngine) refreshPortStats(stats map[string]*core.TrafficStats, now time.Time) {
-	type acc struct {
-		proto string
-		port  int
-		cur   matchCounters
-		ips   map[string]uint64 // ip -> 该端口总字节数
-	}
-	aggs := make(map[string]*acc)
-
-	for ip, st := range stats {
-		for proto, pm := range st.Ports {
-			for port, p := range pm {
-				key := fmt.Sprintf("%s/%d", proto, port)
-				a := aggs[key]
-				if a == nil {
-					a = &acc{proto: proto, port: int(port), ips: make(map[string]uint64)}
-					aggs[key] = a
-				}
-				a.cur.bytesIn += p.BytesRecv
-				a.cur.bytesOut += p.BytesSent
-				a.cur.connsIn += p.ConnsIn
-				a.cur.connsOut += p.ConnsOut
-				a.ips[ip] = p.BytesRecv + p.BytesSent
-			}
-		}
-	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	elapsed := e.evalInterval.Seconds()
-	if !e.portPrevTs.IsZero() {
-		if d := now.Sub(e.portPrevTs).Seconds(); d > 0 {
-			elapsed = d
-		}
-	}
-
-	result := make([]PortTraffic, 0, len(aggs))
-	for key, a := range aggs {
-		prev := e.portPrev[key]
-		var newConns int
-		if prev.counters.connsIn+prev.counters.connsOut <= a.cur.connsIn+a.cur.connsOut {
-			newConns = int(a.cur.connsIn + a.cur.connsOut - prev.counters.connsIn - prev.counters.connsOut)
-		}
-		item := PortTraffic{
-			Proto:          a.proto,
-			Port:           a.port,
-			BytesIn:        a.cur.bytesIn,
-			BytesOut:       a.cur.bytesOut,
-			BytesInPerSec:  float64(deltaSub(a.cur.bytesIn, prev.counters.bytesIn)) / elapsed,
-			BytesOutPerSec: float64(deltaSub(a.cur.bytesOut, prev.counters.bytesOut)) / elapsed,
-			IPCount:        len(a.ips),
-			NewConns:       newConns,
-		}
-
-		// 按流量取前若干个客户端
-		clients := make([]string, 0, len(a.ips))
-		for ip := range a.ips {
-			clients = append(clients, ip)
-		}
-		sort.Slice(clients, func(i, j int) bool { return a.ips[clients[i]] > a.ips[clients[j]] })
-		if len(clients) > topClientsPerPort {
-			clients = clients[:topClientsPerPort]
-		}
-		item.TopClients = clients
-
-		result = append(result, item)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].BytesInPerSec+result[i].BytesOutPerSec > result[j].BytesInPerSec+result[j].BytesOutPerSec
-	})
-	if len(result) > maxPortSummaries {
-		result = result[:maxPortSummaries]
-	}
-	e.portStats = result
-
-	// 更新端口快照基线
-	prev := make(map[string]portPrevEntry, len(aggs))
-	for key, a := range aggs {
-		prev[key] = portPrevEntry{counters: matchCounters{
-			bytesIn:  a.cur.bytesIn,
-			bytesOut: a.cur.bytesOut,
-			connsIn:  a.cur.connsIn,
-			connsOut: a.cur.connsOut,
-		}}
-	}
-	e.portPrev = prev
-	e.portPrevTs = now
-}
-
-// policySource 策略触发的规则的来源标记
 func policySource(policyID uint) string {
 	return fmt.Sprintf("policy:%d", policyID)
 }
@@ -786,12 +672,3 @@ func rateLimitRuleFromPolicy(p *store.Policy) core.RateLimitRule {
 }
 
 // appendIfMissing 向网段列表追加单个 IP（已包含则原样返回）
-func appendIfMissing(nets []*net.IPNet, ip string) []*net.IPNet {
-	if isContainIpNet(nets, ip) {
-		return nets
-	}
-	if n := parseIpNet(ip); n != nil {
-		return append(nets, n)
-	}
-	return nets
-}

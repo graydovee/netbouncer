@@ -2,18 +2,17 @@ package store
 
 import (
 	"fmt"
+	"gorm.io/gorm"
 
 	"github.com/graydovee/netbouncer/pkg/config"
 )
 
 type Store struct {
-	IpNetStore         *IpNetStore
-	IpNetGroupStore    *IpNetGroupStore
-	TrafficSampleStore *TrafficSampleStore
-	TrafficPortStore   *TrafficPortSampleStore
-	TrafficRollupStore *TrafficRollupStore
-	PolicyStore        *PolicyStore
-	RiskEventStore     *RiskEventStore
+	db              *gorm.DB
+	IpNetStore      *IpNetStore
+	IpNetGroupStore *IpNetGroupStore
+	PolicyStore     *PolicyStore
+	RiskEventStore  *RiskEventStore
 }
 
 func NewStore(cfg *config.DatabaseConfig) (*Store, error) {
@@ -28,10 +27,6 @@ func NewStore(cfg *config.DatabaseConfig) (*Store, error) {
 	if err := db.AutoMigrate(
 		IpNet{},
 		IpNetGroup{},
-		TrafficSample{},
-		TrafficPortSample{},
-		TrafficIpRollup{},
-		TrafficPortRollup{},
 		Policy{},
 		RiskEvent{},
 	); err != nil {
@@ -39,12 +34,18 @@ func NewStore(cfg *config.DatabaseConfig) (*Store, error) {
 	}
 
 	return &Store{
-		IpNetStore:         NewIpNetStore(db),
-		IpNetGroupStore:    NewIpNetGroupStore(db),
-		TrafficSampleStore: NewTrafficSampleStore(db),
-		TrafficPortStore:   NewTrafficPortSampleStore(db),
-		TrafficRollupStore: NewTrafficRollupStore(db),
-		PolicyStore:        NewPolicyStore(db),
-		RiskEventStore:     NewRiskEventStore(db),
+		db:              db,
+		IpNetStore:      NewIpNetStore(db),
+		IpNetGroupStore: NewIpNetGroupStore(db),
+		PolicyStore:     NewPolicyStore(db),
+		RiskEventStore:  NewRiskEventStore(db),
 	}, nil
+}
+
+func (s *Store) Close() error {
+	db, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return db.Close()
 }

@@ -74,14 +74,17 @@ func (ts *TrafficStats) GetTotalPackets() uint64 {
 
 // Monitor 网络流量监控器
 type Monitor struct {
-	stats     map[string]*internalTrafficStats
-	mutex     sync.RWMutex
-	handle    *pcap.Handle
-	localIPs  map[string]bool
-	isRunning atomic.Bool
-	stopOnce  sync.Once
-	stopChan  chan bool
-	device    string
+	historyEnabled bool
+	historyDeltas  map[deltaKey]*HistoryDelta
+	historyLost    []int64
+	stats          map[string]*internalTrafficStats
+	mutex          sync.RWMutex
+	handle         *pcap.Handle
+	localIPs       map[string]bool
+	isRunning      atomic.Bool
+	stopOnce       sync.Once
+	stopChan       chan bool
+	device         string
 
 	windowSize        time.Duration // 滑动窗口大小（如30秒）
 	connectionTimeout time.Duration // 连接超时时间
@@ -139,6 +142,7 @@ func NewMonitor(cfg *config.MonitorConfig) (*Monitor, error) {
 	}
 
 	monitor := &Monitor{
+		historyEnabled:    cfg.HistoryInterval > 0,
 		stats:             make(map[string]*internalTrafficStats),
 		localIPs:          make(map[string]bool),
 		stopChan:          make(chan bool),
@@ -426,6 +430,7 @@ func (m *Monitor) updateStats(remoteIP string, localIP string, proto string, src
 		}
 	}
 	entry.add(bytes, isSent, isNewConn || isNewFlow)
+	m.captureDelta(now, remoteIP, proto, dstPort, bytes, isSent)
 
 	stats.lastSeen = now
 }
@@ -481,7 +486,11 @@ func (tw *trafficWindow) addPoint(increment uint64) {
 
 	// 移除过期的数据点
 	tw.cleanup(now)
-	// 添加新数据点
+	// Coalesce packets in each second: window memory is bounded by seconds, not packet rate.
+	if n := len(tw.points); n > 0 && tw.points[n-1].timestamp.Unix() == now.Unix() {
+		tw.points[n-1].increment += increment
+		return
+	}
 	tw.points = append(tw.points, windowPoint{
 		timestamp: now,
 		increment: increment,

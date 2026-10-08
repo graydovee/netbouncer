@@ -234,15 +234,11 @@ func (s *NetService) ListRiskEvents(ip string, page, pageSize int) (*RiskEventLi
 	return &RiskEventListResult{Items: items, Total: total}, nil
 }
 
-// PortStatsProvider 提供实时端口聚合数据（由策略引擎实现，引擎禁用时无数据）
-type PortStatsProvider interface {
-	PortTrafficSnapshot() []PortTraffic
-}
-
 // GetPortTraffic 获取实时端口排行（跨 IP 聚合）
 func (s *NetService) GetPortTraffic() ([]PortTraffic, error) {
-	if s.portProvider == nil {
-		return []PortTraffic{}, nil
+	snap, err := s.currentLive()
+	if err != nil {
+		return nil, err
 	}
-	return s.portProvider.PortTrafficSnapshot(), nil
+	return snap.ports, nil
 }

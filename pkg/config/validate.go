@@ -17,11 +17,14 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("firewall.type 无效: %q (支持 iptables|ipset|mock)", c.Firewall.Type)
 	}
 
-	if c.Monitor.HistoryInterval < 0 || (c.Monitor.HistoryInterval > 0 && c.Monitor.HistoryInterval < 10) {
-		return fmt.Errorf("monitor.history_interval 无效: %d (0 表示禁用，启用时需 >= 10 秒)", c.Monitor.HistoryInterval)
+	if c.Monitor.HistoryInterval != 0 && c.Monitor.HistoryInterval != 60 {
+		return fmt.Errorf("monitor.history_interval 必须为 0 或 60")
 	}
-	if c.Monitor.HistoryRetentionDays < 0 || c.Monitor.HistoryRetentionDays > 365*5 {
-		return fmt.Errorf("monitor.history_retention_days 无效: %d (0 表示永久保留，最大 1825 天)", c.Monitor.HistoryRetentionDays)
+	if c.Monitor.HistoryRetentionDays != 30 {
+		return fmt.Errorf("monitor.history_retention_days 固定为 30")
+	}
+	if c.History.BudgetBytes < 1<<20 || c.History.ReserveBytes < 1<<20 {
+		return fmt.Errorf("history 容量和预留空间必须至少为 1MiB")
 	}
 
 	if c.Firewall.Type != string(FirewallTypeMock) && strings.TrimSpace(c.Firewall.Chain) == "" {

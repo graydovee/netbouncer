@@ -7,6 +7,7 @@ import type {
   TrafficData,
   TrafficHistoryPoint,
   TrafficTopEntry,
+ TrafficPage, TrafficOverview, HistoryResult, StorageStatus,
 } from './types'
 
 export interface TrafficHistoryQuery {
@@ -32,28 +33,31 @@ export interface PortHistoryQuery {
 
 export const trafficApi = {
   /** 获取（排除网段后的）实时流量统计 */
-  get: (): Promise<TrafficData[]> => get<TrafficData[]>('/api/traffic'),
+  get: (query: { page?: number; page_size?: number; sort?: string; order?: string; remote_ip?: string; local_ip?: string } = {}, signal?: AbortSignal): Promise<TrafficPage> => get<TrafficPage>(`/api/traffic${buildQuery(query)}`, signal),
+  overview: (signal?: AbortSignal): Promise<TrafficOverview> => get<TrafficOverview>('/api/traffic/overview', signal),
+  detail: (ip: string, signal?: AbortSignal): Promise<TrafficData> => get<TrafficData>(`/api/traffic/ip/${encodeURIComponent(ip)}`, signal),
+  storage: (signal?: AbortSignal): Promise<StorageStatus> => get<StorageStatus>('/api/traffic/storage', signal),
 
   /** 实时端口排行（跨 IP 聚合，由策略引擎评估循环刷新） */
-  ports: (): Promise<PortTraffic[]> => get<PortTraffic[]>('/api/traffic/ports'),
+  ports: (signal?: AbortSignal): Promise<PortTraffic[]> => get<PortTraffic[]>('/api/traffic/ports', signal),
 
   /** 流量历史趋势（不带 ip 为全服汇总） */
-  history: (query: TrafficHistoryQuery): Promise<TrafficHistoryPoint[]> =>
-    get<TrafficHistoryPoint[]>(`/api/traffic/history${buildQuery({ ...query })}`),
+  history: (query: TrafficHistoryQuery, signal?: AbortSignal): Promise<HistoryResult<TrafficHistoryPoint>> =>
+    get<HistoryResult<TrafficHistoryPoint>>(`/api/traffic/history${buildQuery({ ...query })}`, signal),
 
   /** 时间范围内流量最大的 IP 榜 */
-  historyTop: (query: { start: number; end: number; limit?: number }): Promise<TrafficTopEntry[]> =>
-    get<TrafficTopEntry[]>(`/api/traffic/history/top${buildQuery({ ...query })}`),
+  historyTop: (query: { start: number; end: number; limit?: number }, signal?: AbortSignal): Promise<HistoryResult<TrafficTopEntry>> =>
+    get<HistoryResult<TrafficTopEntry>>(`/api/traffic/history/top${buildQuery({ ...query })}`, signal),
 
   /** 端口维度历史趋势（按 proto+port 分组的分桶序列） */
-  portHistory: (query: PortHistoryQuery): Promise<PortHistoryPoint[]> =>
-    get<PortHistoryPoint[]>(`/api/traffic/history/ports${buildQuery({ ...query })}`),
+  portHistory: (query: PortHistoryQuery, signal?: AbortSignal): Promise<HistoryResult<PortHistoryPoint>> =>
+    get<HistoryResult<PortHistoryPoint>>(`/api/traffic/history/ports${buildQuery({ ...query })}`, signal),
 
   /** 时间范围内流量最大的端口榜 */
-  portHistoryTop: (query: PortHistoryQuery & { limit?: number }): Promise<PortTopEntry[]> =>
-    get<PortTopEntry[]>(`/api/traffic/history/ports/top${buildQuery({ ...query })}`),
+  portHistoryTop: (query: PortHistoryQuery & { limit?: number }, signal?: AbortSignal): Promise<HistoryResult<PortTopEntry>> =>
+    get<HistoryResult<PortTopEntry>>(`/api/traffic/history/ports/top${buildQuery({ ...query })}`, signal),
 
   /** 协议维度历史趋势 */
-  protoHistory: (query: PortHistoryQuery): Promise<ProtoHistoryPoint[]> =>
-    get<ProtoHistoryPoint[]>(`/api/traffic/history/protocols${buildQuery({ ...query })}`),
+  protoHistory: (query: PortHistoryQuery, signal?: AbortSignal): Promise<HistoryResult<ProtoHistoryPoint>> =>
+    get<HistoryResult<ProtoHistoryPoint>>(`/api/traffic/history/protocols${buildQuery({ ...query })}`, signal),
 }

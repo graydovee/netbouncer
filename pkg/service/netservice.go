@@ -3,8 +3,11 @@ package service
 import (
 	"errors"
 	"fmt"
+	"github.com/graydovee/netbouncer/pkg/history"
 	"log/slog"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -48,11 +51,17 @@ type NetService struct {
 	monitor  Monitor
 	firewall Firewall
 
-	store *store.Store
+	store        *store.Store
+	history      *history.Store
+	ruleMu       sync.Mutex
+	ruleIndex    atomic.Pointer[RuleIndex]
+	liveMu       sync.Mutex
+	snapshotDone chan struct{}
+	live         atomic.Pointer[liveSnapshot]
+	historyCache queryCache
 
-	// riskProvider/portProvider 由策略引擎在装配时注入，可为 nil（引擎禁用时）
+	// riskProvider 由策略引擎在装配时注入，可为 nil
 	riskProvider RiskProvider
-	portProvider PortStatsProvider
 }
 
 func NewNetService(monitor Monitor, firewall Firewall, store *store.Store) *NetService {
@@ -66,7 +75,6 @@ func NewNetService(monitor Monitor, firewall Firewall, store *store.Store) *NetS
 // SetPolicyEngine 注入策略引擎（提供风险分与实时端口聚合）
 func (s *NetService) SetPolicyEngine(e *PolicyEngine) {
 	s.riskProvider = e
-	s.portProvider = e
 }
 
 // SetRiskProvider 注入风险分提供者
@@ -147,34 +155,14 @@ func (s *NetService) ensureDefaultGroup() (*store.IpNetGroup, error) {
 
 // buildTrafficData 将流量统计与封禁状态组装为对外的 TrafficData
 func (s *NetService) buildTrafficData(stats map[string]*core.TrafficStats) ([]TrafficData, error) {
-	bannedEntities, err := s.store.IpNetStore.FindByAction(store.ActionBan)
+	idx, err := s.rules()
 	if err != nil {
-		return nil, Internalf("查询封禁列表失败: %v", err)
-	}
-
-	allowEntities, err := s.store.IpNetStore.FindByAction(store.ActionAllow)
-	if err != nil {
-		return nil, Internalf("查询白名单失败: %v", err)
-	}
-
-	bannedIpNets := convertToIpNet(bannedEntities...)
-	allowIpNets := convertToIpNet(allowEntities...)
-
-	// 精确命中表：规则为单个 IP（/32、/128）时按规范化 IP 串建索引，
-	// 供前端区分"精确规则管控"与"被网段规则覆盖"
-	rules := append(bannedEntities, allowEntities...)
-	exact := make(map[string]ruleRef, len(rules))
-	for _, e := range rules {
-		if n := parseIpNet(e.IpNet); n != nil {
-			if ones, bits := n.Mask.Size(); ones == bits {
-				exact[n.IP.String()] = ruleRef{id: e.ID, action: e.Action, expiresAt: e.ExpiresAt}
-			}
-		}
+		return nil, Internalf("读取规则索引失败: %v", err)
 	}
 
 	trafficData := make([]TrafficData, 0, len(stats))
 	for _, stat := range stats {
-		ref := exact[stat.RemoteIP]
+		ref := idx.Exact(stat.RemoteIP)
 
 		item := TrafficData{
 			RemoteIP:        stat.RemoteIP,
@@ -188,7 +176,7 @@ func (s *NetService) buildTrafficData(stats map[string]*core.TrafficStats) ([]Tr
 			Connections:     stat.Connections,
 			FirstSeen:       stat.FirstSeen.Format(time.RFC3339),
 			LastSeen:        stat.LastSeen.Format(time.RFC3339),
-			IsBanned:        IsBanned(bannedIpNets, allowIpNets, stat.RemoteIP),
+			IsBanned:        idx.Banned(stat.RemoteIP),
 			RuleAction:      ref.action,
 			RuleID:          ref.id,
 			Protocols:       convertProtoStats(stat.Protocols),

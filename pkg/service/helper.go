@@ -11,9 +11,12 @@ import (
 func parseIpNet(ipNet string) *net.IPNet {
 	// 首先尝试解析为IP地址
 	if ip := net.ParseIP(ipNet); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			ip = v4
+		}
 		return &net.IPNet{
 			IP:   ip,
-			Mask: net.CIDRMask(32, 32),
+			Mask: net.CIDRMask(len(ip)*8, len(ip)*8),
 		}
 	}
 

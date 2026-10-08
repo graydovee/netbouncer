@@ -2,6 +2,7 @@ package config
 
 // Config 主配置结构
 type Config struct {
+	History  HistoryConfig     `yaml:"history"`
 	Monitor  MonitorConfig     `yaml:"monitor"`
 	Firewall FirewallConfig    `yaml:"firewall"`
 	Policy   PolicyConfig      `yaml:"policy"`
@@ -20,7 +21,7 @@ type MonitorConfig struct {
 
 	// 流量历史持久化
 	HistoryInterval      int `yaml:"history_interval"`       // 采样间隔（秒），0 表示禁用历史持久化
-	HistoryRetentionDays int `yaml:"history_retention_days"` // 1小时聚合层历史保留天数
+	HistoryRetentionDays int `yaml:"history_retention_days"` // 固定30天，容量不足时自动缩短
 }
 
 // PolicyConfig 策略引擎配置
@@ -91,4 +92,11 @@ type DatabaseConfig struct {
 	Database string `yaml:"database"`  // 数据库名称或文件路径
 	DSN      string `yaml:"dsn"`       // 数据库连接字符串
 	LogLevel string `yaml:"log_level"` // SQL日志级别: "silent", "error", "warn", "info"
+}
+
+// HistoryConfig controls the independent versioned shard directory. Retention is fixed at 6h/7d/30d.
+type HistoryConfig struct {
+	Directory    string `yaml:"directory"`
+	BudgetBytes  int64  `yaml:"budget_bytes"`
+	ReserveBytes uint64 `yaml:"reserve_bytes"`
 }
