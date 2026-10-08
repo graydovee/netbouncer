@@ -74,6 +74,7 @@ type ShardStatus struct {
 	Watermark  int64  `json:"watermark"`
 }
 type Status struct {
+	Enabled        bool          `json:"enabled"`
 	SchemaVersion  int           `json:"schema_version"`
 	Bytes          int64         `json:"bytes"`
 	BudgetBytes    int64         `json:"budget_bytes"`

@@ -540,7 +540,8 @@ function TrafficMonitor() {
 
       {/* 概览卡片 */}
       {[overviewError, portsError, trendError, topError, storageError].filter(Boolean).map((message) => <Alert key={message} severity="warning" sx={{ mb: 1 }}>{message}；保留上次成功的数据。</Alert>)}
-      {storage && <Alert severity={storage.paused || storage.last_error ? 'warning' : 'info'} sx={{ mb: 2 }}>
+      {storage && !storage.enabled && <Alert severity="info" sx={{ mb: 2 }}>历史采样已禁用，实时监控继续运行。</Alert>}
+      {storage?.enabled && <Alert severity={storage.paused || storage.last_error ? 'warning' : 'info'} sx={{ mb: 2 }}>
         历史存储 {formatBytes(storage.bytes)} / {formatBytes(storage.budget_bytes)} · 系统盘可用 {formatBytes(storage.free_bytes)}
         {storage.available_start > 0 ? ` · 可查询起点 ${new Date(storage.available_start * 1000).toLocaleString()}` : ' · 等待首个分钟采样'}
         {storage.paused ? ' · 历史采样已暂停，实时监控继续运行' : ''}
@@ -723,9 +724,10 @@ function TrafficMonitor() {
               </Stack>
             )}
             <RowsPerPageControl
+              max={100}
               value={rowsPerPage}
               onChange={(value) => {
-                setRowsPerPage(value)
+                setRowsPerPage(Math.min(100, Math.max(1, value)))
                 setPage(0)
               }}
             />

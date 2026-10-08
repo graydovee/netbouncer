@@ -332,3 +332,39 @@ func TestUnknownFrontendRouteFallsBackToIndex(t *testing.T) {
 		t.Fatalf("status = %d, want 404 or 500", rec.Code)
 	}
 }
+
+func TestDisabledHistoryStatusAndPagedTrafficContract(t *testing.T) {
+	s := newTestServer(t)
+	for _, path := range []string{"/api/traffic", "/api/traffic/storage", "/api/traffic/history"} {
+		rec := doRequest(t, s.echo, http.MethodGet, path, nil)
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Data map[string]json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if path == "/api/traffic" {
+			if _, ok := body.Data["items"]; !ok {
+				t.Fatal("missing items")
+			}
+			if _, ok := body.Data["snapshot_id"]; !ok {
+				t.Fatal("missing snapshot_id")
+			}
+		}
+		if path == "/api/traffic/storage" && string(body.Data["enabled"]) != "false" {
+			t.Fatal("disabled history misreported")
+		}
+		if path == "/api/traffic/history" {
+			if _, ok := body.Data["meta"]; !ok {
+				t.Fatal("missing historical coverage")
+			}
+		}
+	}
+	rec := doRequest(t, s.echo, http.MethodGet, "/api/traffic?sort=unknown", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid sort code %d", rec.Code)
+	}
+}

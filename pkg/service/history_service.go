@@ -29,14 +29,12 @@ type queryCache struct {
 func (s *NetService) SetHistory(h *history.Store) { s.history = h }
 func (s *NetService) HistoryStatus(ctx context.Context) (history.Status, error) {
 	if s.history == nil {
-		return history.Status{}, Invalidf("历史采样未启用")
+		return history.Status{Enabled: false, Gaps: []history.Gap{}, Shards: []history.ShardStatus{}}, nil
 	}
 	return s.history.Status(ctx)
 }
 func (s *NetService) QueryHistory(ctx context.Context, q history.Query) (history.Result, error) {
-	if s.history == nil {
-		return history.Result{Items: []history.Point{}, Meta: history.Meta{Gaps: []history.Gap{{Start: q.Start, End: q.End, Reason: "history_disabled"}}}}, nil
-	}
+
 	if q.Start < 0 || q.End < 0 || q.Start > 0 && q.End > 0 && q.Start >= q.End {
 		return history.Result{}, Invalidf("无效时间范围")
 	}
@@ -61,6 +59,11 @@ func (s *NetService) QueryHistory(ctx context.Context, q history.Query) (history
 	q.Start = q.Start / 30 * 30
 	if q.Start >= q.End {
 		return history.Result{}, Invalidf("无效时间范围")
+	}
+	q.Start = max(q.Start, q.End-30*86400)
+	q.Bucket = min(max(q.Bucket, 60), 86400)
+	if s.history == nil {
+		return history.Result{Items: []history.Point{}, Meta: history.Meta{Start: q.Start, End: q.End, Bucket: q.Bucket, Gaps: []history.Gap{{Start: q.Start, End: q.End, Reason: "history_disabled"}}}}, nil
 	}
 	key := fmt.Sprintf("%+v", q)
 	cache := &s.historyCache

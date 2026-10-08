@@ -5,12 +5,11 @@ interface RowsPerPageControlProps {
   value: number
   onChange: (value: number) => void
   options?: number[]
+  max?: number
 }
 
-const MAX_ROWS = 10000
-
 /** 「每页显示条数」控件：下拉选择 + 自定义输入 */
-export const RowsPerPageControl = ({ value, onChange, options = [10, 25, 50, 100] }: RowsPerPageControlProps) => {
+export const RowsPerPageControl = ({ value, onChange, options = [10, 25, 50, 100], max = 10000 }: RowsPerPageControlProps) => {
   const [custom, setCustom] = useState(String(value))
 
   // 外部分页大小变化时同步输入框
@@ -20,7 +19,7 @@ export const RowsPerPageControl = ({ value, onChange, options = [10, 25, 50, 100
 
   const commitCustom = () => {
     const parsed = parseInt(custom, 10)
-    if (Number.isFinite(parsed) && parsed > 0 && parsed <= MAX_ROWS) {
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= max) {
       onChange(parsed)
     } else {
       setCustom(String(value))
@@ -62,7 +61,8 @@ export const RowsPerPageControl = ({ value, onChange, options = [10, 25, 50, 100
             event.currentTarget.blur()
           }
         }}
-        inputProps={{ min: 1, max: MAX_ROWS }}
+        inputProps={{ min: 1, max }}
+        helperText={`最多 ${max} 条`}
         sx={{ width: 120 }}
       />
     </Box>

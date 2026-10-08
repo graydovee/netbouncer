@@ -278,6 +278,7 @@ export interface HistoryMeta {
 }
 export interface HistoryResult<T> { items: T[]; meta: HistoryMeta }
 export interface StorageStatus {
+ enabled: boolean
  schema_version: number; bytes: number; budget_bytes: number; free_bytes: number; reserve_bytes: number
  available_start: number; freshness: number; paused: boolean; last_error?: string; write_failures: number
  gaps: HistoryGap[]

@@ -542,7 +542,7 @@ func (s *Store) Write(ctx context.Context, batch Batch) error {
 func (s *Store) Status(ctx context.Context) (Status, error) {
 	s.catalog.RLock()
 	defer s.catalog.RUnlock()
-	st := Status{SchemaVersion: schemaVersion, BudgetBytes: s.opt.BudgetBytes, ReserveBytes: s.opt.ReserveBytes, Shards: []ShardStatus{}, Gaps: []Gap{}}
+	st := Status{Enabled: true, SchemaVersion: schemaVersion, BudgetBytes: s.opt.BudgetBytes, ReserveBytes: s.opt.ReserveBytes, Shards: []ShardStatus{}, Gaps: []Gap{}}
 	var err error
 	st.FreeBytes, err = s.opt.FreeSpace(s.opt.Dir)
 	if err != nil {
