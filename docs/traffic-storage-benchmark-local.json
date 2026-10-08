@@ -1,0 +1,67 @@
+{
+  "concurrency": 20,
+  "requests_per_route": 100,
+  "ips": 10000,
+  "rules": 9000,
+  "history_rows": 7347672,
+  "storage_bytes": 1000341504,
+  "metrics": [
+    {
+      "path": "/api/traffic?page_size=25",
+      "cold_ms": 6.3,
+      "p95_ms": 76.432,
+      "max_ms": 106.333,
+      "errors": 0,
+      "budget_ms": 300,
+      "passed": true
+    },
+    {
+      "path": "/api/traffic/overview",
+      "cold_ms": 0.144,
+      "p95_ms": 0.964,
+      "max_ms": 1.249,
+      "errors": 0,
+      "budget_ms": 300,
+      "passed": true
+    },
+    {
+      "path": "/api/traffic/history?start=1791360000&end=1791446400&bucket=900",
+      "cold_ms": 13.101,
+      "p95_ms": 1.37,
+      "max_ms": 1.578,
+      "errors": 0,
+      "budget_ms": 1000,
+      "passed": true
+    },
+    {
+      "path": "/api/traffic/history/top?start=1791360000&end=1791446400&limit=10",
+      "cold_ms": 21.312,
+      "p95_ms": 1.148,
+      "max_ms": 1.251,
+      "errors": 0,
+      "budget_ms": 1000,
+      "passed": true
+    },
+    {
+      "path": "/api/traffic/history?start=1788854400&end=1791446400&bucket=14400",
+      "cold_ms": 45.451,
+      "p95_ms": 1.914,
+      "max_ms": 2.268,
+      "errors": 0,
+      "budget_ms": 2000,
+      "passed": true
+    },
+    {
+      "path": "/api/traffic/history/top?start=1788854400&end=1791446400&limit=10",
+      "cold_ms": 277.595,
+      "p95_ms": 1.129,
+      "max_ms": 1.278,
+      "errors": 0,
+      "budget_ms": 2000,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "environment": "Local macOS arm64; isolated synthetic data, authenticated loopback HTTP, 20 concurrent readers",
+  "source_commit": "8b9c69c"
+}

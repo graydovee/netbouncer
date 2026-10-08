@@ -18,12 +18,12 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file %s: %w", configPath, err)
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	cfg := DefaultConfig()
+	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", configPath, err)
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 // SaveConfig 保存配置到文件

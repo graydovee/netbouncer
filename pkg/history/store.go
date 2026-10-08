@@ -74,11 +74,41 @@ func Open(opt Options) (*Store, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
+	// SQLite coverage is authoritative if persisting process metadata failed after commit.
+	all, err := s.shards()
+	if err != nil {
+		return nil, err
+	}
+	for i := len(all) - 1; i >= 0; i-- {
+		v := all[i]
+		if v.resolution != Minute {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		db, release, e := s.acquire(ctx, v.name, false)
+		if e != nil {
+			cancel()
+			_ = s.Close()
+			return nil, e
+		}
+		var latest sql.NullInt64
+		e = db.QueryRowContext(ctx, "SELECT MAX(ts) FROM coverage").Scan(&latest)
+		release()
+		cancel()
+		if e != nil {
+			_ = s.Close()
+			return nil, e
+		}
+		if latest.Valid {
+			s.state.LastCommit = max(s.state.LastCommit, latest.Int64+Minute)
+		}
+		break
+	}
 	now := time.Now().Unix()
 	if s.state.LastCommit == 0 {
 		s.recordGapLocked(now/60*60, now, "capture_started")
 	}
-	if s.state.LastCommit > 0 && now > s.state.LastCommit+60 {
+	if s.state.LastCommit > 0 && now > s.state.LastCommit {
 		s.recordGapLocked(s.state.LastCommit, now, "process_unavailable")
 	}
 	if err = s.saveState(); err != nil {

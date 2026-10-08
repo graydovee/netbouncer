@@ -249,12 +249,41 @@ func TestZeroTrafficOnlyWritesCoverageAndSchemaRejectsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw.Close()
-	reopened, err := Open(Options{Dir: s.opt.Dir, FreeSpace: s.opt.FreeSpace})
+	_, err = Open(Options{Dir: s.opt.Dir, FreeSpace: s.opt.FreeSpace})
+	if err == nil {
+		t.Fatal("unknown schema accepted at startup")
+	}
+}
+func TestRestartReportsPartialMinuteLossAndRecoversCommittedWatermark(t *testing.T) {
+	s := testStore(t)
+	now := time.Now().Unix()
+	ts := now/60*60 - 60
+	write(t, s, ts, Delta{IP: "1.1.1.1", Proto: "tcp", Port: 80, BytesIn: 1})
+	dir := s.opt.Dir
+	s.Close()
+	// Simulate process-state persistence failing after the SQLite minute committed.
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"last_commit":0,"gaps":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(Options{Dir: dir, FreeSpace: s.opt.FreeSpace})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if _, err = reopened.Query(context.Background(), Query{Start: ts, End: ts + 60, Port: -1}); err == nil {
-		t.Fatal("unknown schema accepted")
+	status, err := reopened.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, g := range status.Gaps {
+		if g.Reason == "process_unavailable" {
+			if g.Start != ts+60 {
+				t.Fatalf("false gap before committed minute %+v", g)
+			}
+			found = true
+		}
+	}
+	if now > ts+60 && !found {
+		t.Fatal("partial minute loss was silent")
 	}
 }

@@ -126,10 +126,11 @@ func applyExplicitFlags(cmd *cobra.Command, cfg *config.Config, bindings map[str
 		if !ok {
 			continue
 		}
-		value, err := cmd.Flags().GetString(name)
-		if err != nil {
+		flag := cmd.Flags().Lookup(name)
+		if flag == nil {
 			continue
 		}
+		value := flag.Value.String()
 		if err := apply(cfg, value); err != nil {
 			slog.Warn("应用命令行参数失败", "flag", name, "error", err)
 		}
@@ -334,7 +335,7 @@ func run(cmd *cobra.Command) error {
 // mergeConfig 将文件配置合并到默认配置上（文件中设置的字段覆盖默认值）
 func mergeConfig(defaultCfg, fileCfg *config.Config) (*config.Config, error) {
 	merged := *defaultCfg
-	if err := mergo.Merge(&merged, fileCfg, mergo.WithOverride); err != nil {
+	if err := mergo.Merge(&merged, fileCfg, mergo.WithOverride, mergo.WithOverwriteWithEmptyValue); err != nil {
 		return nil, err
 	}
 	return &merged, nil
